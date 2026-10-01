@@ -210,23 +210,23 @@ class FinanceProductionSyncService
             $response = Http::withHeaders([
                 'X-API-KEY' => $apiKey,
                 'Accept' => 'application/json',
-            ])->timeout(5)->get("{$url}/api/v1/finance/published-reports");
+            ])->timeout(6)->get("{$url}/api/v1/finance/production-feed");
 
-            if ($response->successful() || $response->status() === 404 || $response->status() === 200) {
+            if ($response->successful()) {
                 return [
                     'success' => true,
-                    'message' => "Koneksi ke Finance Monitoring ({$url}) berhasil terhubung!",
+                    'message' => "Koneksi ke Finance Monitoring ({$url}) berhasil terhubung dengan sempurna (HTTP {$response->status()})!",
                 ];
             }
 
             return [
                 'success' => false,
-                'message' => "Finance API merespons status: HTTP {$response->status()}",
+                'message' => "Finance API merespons status: HTTP {$response->status()} - ".($response->json('message') ?? 'Akses ditolak atau endpoint salah'),
             ];
         } catch (\Throwable $e) {
             return [
                 'success' => false,
-                'message' => 'Tidak dapat terhubung ke Finance: '.$e->getMessage(),
+                'message' => 'Tidak dapat terhubung ke Finance ('.$url.'): '.$e->getMessage(),
             ];
         }
     }
