@@ -49,6 +49,13 @@ const submit = () => {
             <div v-if="status" class="status-msg">
                 {{ status }}
             </div>
+            <div
+                v-else-if="($page.props as any).flash?.error"
+                class="status-msg"
+                style="background: rgba(239, 68, 68, 0.12); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2);"
+            >
+                {{ ($page.props as any).flash?.error }}
+            </div>
 
             <!-- Form -->
             <form @submit.prevent="submit">

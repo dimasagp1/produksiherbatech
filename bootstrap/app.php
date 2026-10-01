@@ -32,4 +32,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        $exceptions->respond(function ($response, $e, Request $request) {
+            if ($response->getStatusCode() === 419) {
+                return back()->with('error', 'Sesi login Anda telah kedaluwarsa karena tidak ada aktivitas. Silakan masukkan password kembali.');
+            }
+
+            return $response;
+        });
     })->create();
