@@ -47,11 +47,46 @@ return [
         'mysql' => [
             'driver' => 'mysql',
             'url' => env('DB_URL'),
-            'host' => env('DB_HOST', '127.0.0.1'),
-            'port' => env('DB_PORT', '3306'),
-            'database' => env('DB_DATABASE', 'laravel'),
-            'username' => env('DB_USERNAME', 'root'),
-            'password' => env('DB_PASSWORD', ''),
+            'host' => (function () {
+                $p = base_path('.env');
+                if (file_exists($p) && preg_match('/^DB_HOST=(.*)$/m', file_get_contents($p), $m)) {
+                    return trim($m[1], " \t\n\r\0\x0B\"'");
+                }
+
+                return env('DB_HOST', '127.0.0.1');
+            })(),
+            'port' => (function () {
+                $p = base_path('.env');
+                if (file_exists($p) && preg_match('/^DB_PORT=(.*)$/m', file_get_contents($p), $m)) {
+                    return trim($m[1], " \t\n\r\0\x0B\"'");
+                }
+
+                return env('DB_PORT', '3306');
+            })(),
+            'database' => (function () {
+                $p = base_path('.env');
+                if (file_exists($p) && preg_match('/^DB_DATABASE=(.*)$/m', file_get_contents($p), $m)) {
+                    return trim($m[1], " \t\n\r\0\x0B\"'");
+                }
+
+                return env('DB_DATABASE', 'produksi');
+            })(),
+            'username' => (function () {
+                $p = base_path('.env');
+                if (file_exists($p) && preg_match('/^DB_USERNAME=(.*)$/m', file_get_contents($p), $m)) {
+                    return trim($m[1], " \t\n\r\0\x0B\"'");
+                }
+
+                return env('DB_USERNAME', 'root');
+            })(),
+            'password' => (function () {
+                $p = base_path('.env');
+                if (file_exists($p) && preg_match('/^DB_PASSWORD=(.*)$/m', file_get_contents($p), $m)) {
+                    return trim($m[1], " \t\n\r\0\x0B\"'");
+                }
+
+                return env('DB_PASSWORD', '');
+            })(),
             'unix_socket' => env('DB_SOCKET', ''),
             'charset' => env('DB_CHARSET', 'utf8mb4'),
             'collation' => env('DB_COLLATION', 'utf8mb4_unicode_ci'),

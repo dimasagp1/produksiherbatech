@@ -5,6 +5,7 @@ import InputLabel from '@/Components/InputLabel.vue'
 import PrimaryButton from '@/Components/PrimaryButton.vue'
 import SecondaryButton from '@/Components/SecondaryButton.vue'
 import TextInput from '@/Components/TextInput.vue'
+import Modal from '@/Components/Modal.vue'
 import { Head, Link, useForm, router } from '@inertiajs/vue3'
 import { ref, computed } from 'vue'
 import axios from 'axios'
@@ -55,7 +56,7 @@ function sanitizeUrl(raw: string): string {
 }
 
 const form = useForm({
-  finance_api_url: sanitizeUrl(props.settings?.url || 'http://localhost:8000'),
+  finance_api_url: sanitizeUrl(props.settings?.url || 'http://financea.test'),
   finance_api_key: props.settings?.api_key || 'bsc_sec_live_9f82d1c6b3e44a7b',
   finance_auto_sync: props.settings?.auto_sync ?? false,
 })
@@ -65,10 +66,11 @@ const showApiKey = ref(false)
 const isTesting = ref(false)
 const testResult = ref<{ success?: boolean; message?: string; latency_ms?: number; endpoint?: string } | null>(null)
 const isSyncing = ref(false)
+const showConfirmSyncModal = ref(false)
 const copiedState = ref(false)
 
 const computedEndpoint = computed(() => {
-  const base = sanitizeUrl(form.finance_api_url) || 'http://localhost:8000'
+  const base = sanitizeUrl(form.finance_api_url) || 'http://financea.test'
   return `${base}/api/v1/finance/production-feed`
 })
 
@@ -76,8 +78,8 @@ function onUrlBlur() {
   form.finance_api_url = sanitizeUrl(form.finance_api_url)
 }
 
-function setDefaultLocalUrl() {
-  form.finance_api_url = 'http://localhost:8000'
+function setDefaultFinanceUrl() {
+  form.finance_api_url = 'http://financea.test'
   testResult.value = null
 }
 
@@ -118,10 +120,17 @@ async function runTestConnection() {
   }
 }
 
-function runSyncNow() {
-  if (!confirm(`Kirim feed data produksi (Output Fisik, Target, OEE, Jam Mesin, Downtime & SO Variance) periode ${selectedPeriod.value} ke Finance Monitoring sekarang?`)) {
-    return
+function openConfirmSyncModal() {
+  showConfirmSyncModal.value = true
+}
+
+function closeConfirmSyncModal() {
+  if (!isSyncing.value) {
+    showConfirmSyncModal.value = false
   }
+}
+
+function executeSyncNow() {
   isSyncing.value = true
   router.post(route('admin.settings.finance.sync'), {
     period: selectedPeriod.value,
@@ -129,6 +138,7 @@ function runSyncNow() {
     preserveScroll: true,
     onFinish: () => {
       isSyncing.value = false
+      showConfirmSyncModal.value = false
     }
   })
 }
@@ -200,10 +210,10 @@ function formatNumber(num?: number): string {
                   <InputLabel for="finance_api_url" value="Base URL Sistem Finance *" class="text-xs font-bold uppercase tracking-wider" />
                   <button
                     type="button"
-                    @click="setDefaultLocalUrl"
+                    @click="setDefaultFinanceUrl"
                     class="text-[11px] text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-semibold"
                   >
-                    Reset Default (http://localhost:8000)
+                    Gunakan Domain Laragon (http://financea.test)
                   </button>
                 </div>
                 <div class="relative">
@@ -213,12 +223,12 @@ function formatNumber(num?: number): string {
                     type="text"
                     @blur="onUrlBlur"
                     class="block w-full font-mono text-sm text-gray-900 dark:text-gray-100"
-                    placeholder="http://localhost:8000"
+                    placeholder="http://financea.test"
                     required
                   />
                 </div>
                 <p class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                  Host URL aplikasi Finance Monitoring (contoh: <code>http://localhost:8000</code> atau <code>http://financea.test</code>).
+                  Domain URL aplikasi Finance Monitoring pada Laragon: <code>http://financea.test</code> (atau <code>http://localhost:8000</code> jika dijalankan via artisan serve terpisah).
                 </p>
                 <InputError class="mt-1" :message="form.errors.finance_api_url" />
               </div>
@@ -420,7 +430,7 @@ function formatNumber(num?: number): string {
 
               <button
                 type="button"
-                @click="runSyncNow"
+                @click="openConfirmSyncModal"
                 :disabled="isSyncing"
                 class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
               >
@@ -457,5 +467,87 @@ function formatNumber(num?: number): string {
 
       </div>
     </div>
+
+    <!-- Centered Modal Dialog Konfirmasi Sinkronisasi -->
+    <Modal :show="showConfirmSyncModal" @close="closeConfirmSyncModal" maxWidth="lg">
+      <div class="p-6">
+        <div class="flex items-start gap-4">
+          <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-950/80 dark:text-emerald-400 shadow-xs">
+            <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+          </div>
+          <div class="space-y-1">
+            <h3 class="text-base font-bold text-gray-900 dark:text-gray-100">
+              Konfirmasi Kirim Feed Produksi
+            </h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+              Data agregasi operasional pabrik akan dikirim dan distaging ke sistem Finance Monitoring untuk kalkulasi HPP & rasio finansial.
+            </p>
+          </div>
+        </div>
+
+        <div class="mt-5 space-y-3 rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/60 text-xs">
+          <div class="flex items-center justify-between border-b border-gray-200/70 pb-2.5 dark:border-gray-700/70">
+            <span class="text-gray-500 dark:text-gray-400">Periode Data:</span>
+            <span class="font-bold text-emerald-600 dark:text-emerald-400 font-mono text-sm bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-200/50 dark:border-emerald-800/50">
+              {{ selectedPeriod }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between border-b border-gray-200/70 pb-2.5 dark:border-gray-700/70">
+            <span class="text-gray-500 dark:text-gray-400">Target Endpoint:</span>
+            <span class="font-mono text-[11px] text-gray-800 dark:text-gray-200 truncate max-w-[240px]">{{ computedEndpoint }}</span>
+          </div>
+          <div class="space-y-1.5 pt-1">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">Rangkuman Data yang Dikirim:</span>
+            <ul class="grid grid-cols-2 gap-1.5 text-[11px] text-gray-600 dark:text-gray-400">
+              <li class="flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                Output Fisik & Target Plan
+              </li>
+              <li class="flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                OEE & Yield Persen
+              </li>
+              <li class="flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
+                Jam Mesin & Downtime
+              </li>
+              <li class="flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full bg-rose-500"></span>
+                Reject & Material Loss
+              </li>
+              <li class="col-span-2 flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+                Variansi Stock Opname (FG, RM, PM, WIP)
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="mt-6 flex items-center justify-end gap-3">
+          <SecondaryButton
+            type="button"
+            @click="closeConfirmSyncModal"
+            :disabled="isSyncing"
+            class="text-xs"
+          >
+            Batal
+          </SecondaryButton>
+          <PrimaryButton
+            type="button"
+            @click="executeSyncNow"
+            :disabled="isSyncing"
+            class="!bg-emerald-600 hover:!bg-emerald-700 text-xs inline-flex items-center gap-2"
+          >
+            <svg v-if="isSyncing" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>{{ isSyncing ? 'Mengirim Data...' : 'Ya, Kirim Data Sekarang' }}</span>
+          </PrimaryButton>
+        </div>
+      </div>
+    </Modal>
   </AuthenticatedLayout>
 </template>

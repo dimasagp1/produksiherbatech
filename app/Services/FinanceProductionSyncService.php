@@ -20,7 +20,7 @@ class FinanceProductionSyncService
     public function getFinanceConfig(): array
     {
         return [
-            'url' => Setting::get('finance_api_url', config('services.finance.url', env('FINANCE_API_URL', 'http://localhost:8000'))),
+            'url' => Setting::get('finance_api_url', config('services.finance.url', env('FINANCE_API_URL', 'http://financea.test'))),
             'api_key' => Setting::get('finance_api_key', config('services.finance.api_key', env('SUPERAPPS_API_KEY', 'bsc_sec_live_9f82d1c6b3e44a7b'))),
             'auto_sync' => (bool) Setting::get('finance_auto_sync', false),
             'last_synced_at' => Setting::get('finance_last_synced_at', null),

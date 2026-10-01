@@ -92,7 +92,7 @@ class FinanceSettingController extends Controller
     {
         $url = trim($url);
         if (empty($url)) {
-            return 'http://localhost:8000';
+            return 'http://financea.test';
         }
 
         if (preg_match('/(https?:\/\/[^\/]+?)https?:\/\//i', $url, $m)) {

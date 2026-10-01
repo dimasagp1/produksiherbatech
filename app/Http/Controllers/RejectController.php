@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\LaporanHarian;
+use App\Models\Produk;
 use App\Models\RejectDetail;
 use App\Services\OdooService;
 use Illuminate\Http\Request;
@@ -16,6 +17,11 @@ class RejectController extends Controller
         $user = auth()->user();
         $search = $request->input('search', '');
         $filter = $request->input('filter', 'all');
+        $month = $request->input('month', ''); // e.g. '2026-10'
+        $startDate = $request->input('start_date', '');
+        $endDate = $request->input('end_date', '');
+        $produkId = $request->input('produk_id', '');
+        $sortBy = $request->input('sort_by', 'tanggal_desc');
 
         // 1. Laporan Harian (Produksi)
         $query = LaporanHarian::with(['produk', 'mesin', 'line', 'user', 'rejectDetails.creator'])
@@ -27,15 +33,66 @@ class RejectController extends Controller
             $query->whereHas('rejectDetails', fn ($q) => $q->whereNotNull('odoo_scrap_id'));
         }
 
+        // Filter per Bulan (YYYY-MM)
+        if (! empty($month)) {
+            $parts = explode('-', $month);
+            if (count($parts) === 2) {
+                $query->whereYear('tanggal', (int) $parts[0])
+                    ->whereMonth('tanggal', (int) $parts[1]);
+            }
+        }
+
+        // Filter Rentang Tanggal
+        if (! empty($startDate)) {
+            $query->whereDate('tanggal', '>=', $startDate);
+        }
+        if (! empty($endDate)) {
+            $query->whereDate('tanggal', '<=', $endDate);
+        }
+
+        // Filter Produk / Item
+        if (! empty($produkId)) {
+            $query->where('produk_id', $produkId);
+        }
+
+        // Pencarian Umum
         $query->when($search, function ($q, $s) {
             $q->where(function ($qq) use ($s) {
-                $qq->whereHas('produk', fn ($q) => $q->where('nama_produk', 'like', "%{$s}%"))
+                $qq->whereHas('produk', fn ($p) => $p->where('nama_produk', 'like', "%{$s}%")->orWhere('kode_produk', 'like', "%{$s}%"))
                     ->orWhere('batch_number', 'like', "%{$s}%")
                     ->orWhere('proses', 'like', "%{$s}%");
             });
         });
 
-        $productions = $query->orderByDesc('updated_at')->orderByDesc('tanggal')->paginate(15)->withQueryString();
+        // Sorting
+        switch ($sortBy) {
+            case 'tanggal_asc':
+                $query->orderBy('tanggal', 'asc')->orderBy('id', 'asc');
+                break;
+            case 'reject_desc':
+                $query->orderByDesc('total_reject')->orderByDesc('tanggal');
+                break;
+            case 'reject_asc':
+                $query->orderBy('total_reject', 'asc')->orderByDesc('tanggal');
+                break;
+            case 'batch_asc':
+                $query->orderBy('batch_number', 'asc');
+                break;
+            case 'batch_desc':
+                $query->orderByDesc('batch_number');
+                break;
+            case 'produk_asc':
+                $query->join('produks', 'laporan_harians.produk_id', '=', 'produks.id')
+                    ->orderBy('produks.nama_produk', 'asc')
+                    ->select('laporan_harians.*');
+                break;
+            case 'tanggal_desc':
+            default:
+                $query->orderByDesc('tanggal')->orderByDesc('updated_at');
+                break;
+        }
+
+        $productions = $query->paginate(15)->withQueryString();
         $productions->getCollection()->transform(function ($item) {
             $available = $item->output_fisik ?? $item->capacity_fisik ?? 0;
             $item->available_qty = (int) $available;
@@ -45,9 +102,25 @@ class RejectController extends Controller
             return $item;
         });
 
-        // 2. Daftar Detail Item Reject
+        // 2. Daftar Detail Item Reject (untuk pencarian / history)
         $rejectDetailsQuery = RejectDetail::with(['laporanHarian.produk', 'laporanHarian.line', 'laporanHarian.mesin', 'creator'])
             ->latest();
+
+        if (! empty($month)) {
+            $parts = explode('-', $month);
+            if (count($parts) === 2) {
+                $rejectDetailsQuery->whereHas('laporanHarian', fn ($q) => $q->whereYear('tanggal', (int) $parts[0])->whereMonth('tanggal', (int) $parts[1]));
+            }
+        }
+        if (! empty($startDate)) {
+            $rejectDetailsQuery->whereHas('laporanHarian', fn ($q) => $q->whereDate('tanggal', '>=', $startDate));
+        }
+        if (! empty($endDate)) {
+            $rejectDetailsQuery->whereHas('laporanHarian', fn ($q) => $q->whereDate('tanggal', '<=', $endDate));
+        }
+        if (! empty($produkId)) {
+            $rejectDetailsQuery->whereHas('laporanHarian', fn ($q) => $q->where('produk_id', $produkId));
+        }
 
         if ($search) {
             $rejectDetailsQuery->where(function ($q) use ($search) {
@@ -67,11 +140,28 @@ class RejectController extends Controller
 
         $rejectDetails = $rejectDetailsQuery->paginate(20, ['*'], 'reject_page')->withQueryString();
 
+        // 3. Master Produk untuk Filter Dropdown
+        $produks = Produk::select('id', 'kode_produk', 'nama_produk')
+            ->orderBy('nama_produk')
+            ->get();
+
+        // 4. Ringkasan Statistik Filtered
+        $totalFilteredReject = (int) (clone $rejectDetailsQuery)->sum('jumlah');
+
         return Inertia::render('Reject/Index', [
             'productions' => $productions,
             'rejectDetails' => $rejectDetails,
+            'produks' => $produks,
             'search' => $search,
             'filter' => $filter,
+            'month' => $month,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'produk_id' => $produkId ? (int) $produkId : '',
+            'sort_by' => $sortBy,
+            'stats' => [
+                'total_reject_pcs' => $totalFilteredReject,
+            ],
         ]);
     }
 
