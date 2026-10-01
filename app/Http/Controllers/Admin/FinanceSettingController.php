@@ -81,7 +81,7 @@ class FinanceSettingController extends Controller
             'success' => $result['success'],
             'message' => $result['message'],
             'latency_ms' => $latencyMs,
-            'endpoint' => ($url ?: $syncService->getFinanceConfig()['url']).'/api/v1/finance/published-reports',
+            'endpoint' => ($url ?: $syncService->getFinanceConfig()['url']).'/api/v1/finance/production-feed',
         ], $result['success'] ? 200 : 400);
     }
 
