@@ -156,7 +156,6 @@ Route::middleware(['auth', 'role:leader|operator|spv|superadmin|admin|manager'])
     Route::get('/', [RejectController::class, 'index'])->name('index');
     Route::post('/', [RejectController::class, 'store'])->name('store');
     Route::post('/sync-odoo', [RejectController::class, 'syncFromOdoo'])->name('sync-odoo');
-    Route::post('/{rejectDetail}/push-odoo', [RejectController::class, 'pushToOdoo'])->name('push-odoo');
     Route::delete('/{rejectDetail}', [RejectController::class, 'destroy'])->name('destroy');
 });
 

@@ -159,22 +159,6 @@ const paginatedOdooScraps = computed(() => {
     return filteredOdooScraps.value.slice(start, start + odooPerPage.value);
 });
 
-// Single reject push to Odoo
-const pushingRejectId = ref<number | null>(null);
-function pushSingleRejectToOdoo(rejectId: number) {
-    pushingRejectId.value = rejectId;
-    router.post(
-        route('reject.push-odoo', rejectId),
-        {},
-        {
-            preserveScroll: true,
-            onFinish: () => {
-                pushingRejectId.value = null;
-            },
-        },
-    );
-}
-
 // Odoo MO Reject Sync
 const syncingRejects = ref(false);
 function syncMoRejects() {

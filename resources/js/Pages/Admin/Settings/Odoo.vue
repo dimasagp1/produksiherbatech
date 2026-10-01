@@ -19,7 +19,6 @@ const props = defineProps<{
         odoo_username: string;
         odoo_api_key: string;
         odoo_timeout: number;
-        odoo_auto_push_reject: boolean;
     };
     stats: {
         synced_products: number;
@@ -34,7 +33,6 @@ const form = useForm({
     odoo_username: props.settings.odoo_username || '',
     odoo_api_key: props.settings.odoo_api_key || '',
     odoo_timeout: props.settings.odoo_timeout || 15,
-    odoo_auto_push_reject: props.settings.odoo_auto_push_reject || false,
 });
 
 const showApiKey = ref(false);
@@ -318,23 +316,16 @@ function formatDate(iso: string | null) {
                                     />
                                 </div>
 
-                                <!-- Auto-push reject -->
+                                <!-- One-Way Integration Notice -->
                                 <div class="flex items-center pt-6">
-                                    <label
-                                        class="flex cursor-pointer items-center gap-2.5"
+                                    <div
+                                        class="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300"
                                     >
-                                        <input
-                                            type="checkbox"
-                                            v-model="form.odoo_auto_push_reject"
-                                            class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700"
-                                        />
-                                        <span
-                                            class="text-xs font-medium text-gray-700 dark:text-gray-300"
-                                        >
-                                            Otomatis kirim Reject ke Scrap Order
-                                            Odoo
-                                        </span>
-                                    </label>
+                                        <svg class="h-4 w-4 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <span>Komunikasi 1 Arah: Sistem Produksi hanya menarik data dari Odoo (Read-Only).</span>
+                                    </div>
                                 </div>
                             </div>
 

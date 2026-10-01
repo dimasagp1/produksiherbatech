@@ -4,11 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\LaporanHarian;
 use App\Models\RejectDetail;
-use App\Models\Setting;
 use App\Services\OdooService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 
 class RejectController extends Controller
@@ -128,10 +126,9 @@ class RejectController extends Controller
         $jenisToStore = $validated['jenis_reject'];
         $alasan = trim($validated['alasan_reject']);
 
-        $rejectRecord = null;
         try {
-            DB::transaction(function () use ($laporan, $jenisToStore, $validated, $alasan, $user, &$rejectRecord) {
-                $rejectRecord = RejectDetail::create([
+            DB::transaction(function () use ($laporan, $jenisToStore, $validated, $alasan, $user) {
+                RejectDetail::create([
                     'laporan_harian_id' => $laporan->id,
                     'jenis_reject' => $jenisToStore,
                     'jumlah' => $validated['qty_reject'],
@@ -139,43 +136,11 @@ class RejectController extends Controller
                     'created_by' => $user->id,
                 ]);
             });
-
-            // Otomatis kirim ke Scrap Order Odoo jika pengaturan aktif
-            if ($rejectRecord && Setting::get('odoo_auto_push_reject', config('odoo.reject.auto_push_on_submit', false))) {
-                try {
-                    app(OdooService::class)->pushRejectToOdoo($rejectRecord);
-                } catch (\Throwable $odooErr) {
-                    Log::warning('Auto push reject ke Odoo gagal: '.$odooErr->getMessage());
-                }
-            }
         } catch (\Throwable $e) {
             return back()->withErrors(['error' => 'Gagal menyimpan data reject. Silakan coba lagi.']);
         }
 
         return back()->with('success', 'Reject produk berhasil disimpan.');
-    }
-
-    /**
-     * Kirim data reject lokal ke Scrap Order Odoo ERP
-     */
-    public function pushToOdoo(RejectDetail $rejectDetail, OdooService $odooService)
-    {
-        $user = auth()->user();
-        if ($user->hasRole('manager')) {
-            abort(403, 'Manager hanya memiliki akses baca.');
-        }
-
-        try {
-            $odooService->reloadConfig();
-            $result = $odooService->pushRejectToOdoo($rejectDetail);
-            if ($result['success']) {
-                return back()->with('success', "Item reject berhasil dikirim ke Odoo sebagai Scrap Order #{$result['odoo_scrap_id']}");
-            }
-
-            return back()->withErrors(['error' => $result['message'] ?? 'Gagal push reject ke Odoo.']);
-        } catch (\Throwable $e) {
-            return back()->withErrors(['error' => 'Gagal push ke Odoo: '.$e->getMessage()]);
-        }
     }
 
     /**

@@ -26,7 +26,6 @@ class OdooSyncController extends Controller
             'odoo_username' => Setting::get('odoo_username', config('odoo.username', '')),
             'odoo_api_key' => Setting::get('odoo_api_key', config('odoo.api_key', '')),
             'odoo_timeout' => (int) Setting::get('odoo_timeout', config('odoo.timeout', 15)),
-            'odoo_auto_push_reject' => (bool) Setting::get('odoo_auto_push_reject', config('odoo.reject.auto_push_on_submit', false)),
         ];
 
         $syncedProductsCount = Produk::whereNotNull('odoo_id')->count();
@@ -58,7 +57,6 @@ class OdooSyncController extends Controller
             'odoo_username' => 'required|string|max:150',
             'odoo_api_key' => 'nullable|string|max:255',
             'odoo_timeout' => 'nullable|integer|min:5|max:60',
-            'odoo_auto_push_reject' => 'nullable|boolean',
         ]);
 
         Setting::set('odoo_host', rtrim($validated['odoo_host'], '/'), 'odoo');
@@ -70,7 +68,6 @@ class OdooSyncController extends Controller
         }
 
         Setting::set('odoo_timeout', $validated['odoo_timeout'] ?? 15, 'odoo');
-        Setting::set('odoo_auto_push_reject', ! empty($validated['odoo_auto_push_reject']) ? '1' : '0', 'odoo');
 
         $odooService->reloadConfig();
 
