@@ -1,0 +1,227 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\LaporanHarian;
+use App\Models\RejectDetail;
+use App\Models\Setting;
+use App\Services\OdooService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Inertia\Inertia;
+
+class RejectController extends Controller
+{
+    public function index(Request $request)
+    {
+        $user = auth()->user();
+        $search = $request->input('search', '');
+        $filter = $request->input('filter', 'all');
+
+        // 1. Laporan Harian (Produksi)
+        $query = LaporanHarian::with(['produk', 'mesin', 'line', 'user', 'rejectDetails.creator'])
+            ->withSum('rejectDetails as total_reject', 'jumlah');
+
+        if ($filter === 'has_reject') {
+            $query->has('rejectDetails');
+        } elseif ($filter === 'odoo') {
+            $query->whereHas('rejectDetails', fn ($q) => $q->whereNotNull('odoo_scrap_id'));
+        }
+
+        $query->when($search, function ($q, $s) {
+            $q->where(function ($qq) use ($s) {
+                $qq->whereHas('produk', fn ($q) => $q->where('nama_produk', 'like', "%{$s}%"))
+                    ->orWhere('batch_number', 'like', "%{$s}%")
+                    ->orWhere('proses', 'like', "%{$s}%");
+            });
+        });
+
+        $productions = $query->orderByDesc('updated_at')->orderByDesc('tanggal')->paginate(15)->withQueryString();
+        $productions->getCollection()->transform(function ($item) {
+            $available = $item->output_fisik ?? $item->capacity_fisik ?? 0;
+            $item->available_qty = (int) $available;
+            $item->total_reject = (int) ($item->total_reject ?? 0);
+            $item->sisa_qty = max(0, $item->available_qty - $item->total_reject);
+
+            return $item;
+        });
+
+        // 2. Daftar Detail Item Reject
+        $rejectDetailsQuery = RejectDetail::with(['laporanHarian.produk', 'laporanHarian.line', 'laporanHarian.mesin', 'creator'])
+            ->latest();
+
+        if ($search) {
+            $rejectDetailsQuery->where(function ($q) use ($search) {
+                $q->where('keterangan', 'like', "%{$search}%")
+                    ->orWhere('jenis_reject', 'like', "%{$search}%")
+                    ->orWhere('odoo_scrap_id', 'like', "%{$search}%")
+                    ->orWhereHas('laporanHarian', function ($qq) use ($search) {
+                        $qq->where('batch_number', 'like', "%{$search}%")
+                            ->orWhere('proses', 'like', "%{$search}%")
+                            ->orWhereHas('produk', function ($p) use ($search) {
+                                $p->where('nama_produk', 'like', "%{$search}%")
+                                    ->orWhere('kode_produk', 'like', "%{$search}%");
+                            });
+                    });
+            });
+        }
+
+        $rejectDetails = $rejectDetailsQuery->paginate(20, ['*'], 'reject_page')->withQueryString();
+
+        return Inertia::render('Reject/Index', [
+            'productions' => $productions,
+            'rejectDetails' => $rejectDetails,
+            'search' => $search,
+            'filter' => $filter,
+        ]);
+    }
+
+    public function store(Request $request)
+    {
+        $user = auth()->user();
+        if ($user->hasRole('manager')) {
+            abort(403, 'Manager hanya bisa read-only.');
+        }
+        if (! $user->hasAnyRole(['leader', 'operator', 'spv', 'admin', 'superadmin'])) {
+            abort(403, 'Anda tidak memiliki akses untuk melakukan reject.');
+        }
+
+        $validated = $request->validate([
+            'laporan_harian_id' => 'required|exists:laporan_harians,id',
+            'alasan_reject' => ['required', 'string', 'min:3', function ($attr, $val, $fail) {
+                if (trim($val) === '') {
+                    $fail('Alasan reject wajib diisi.');
+                }
+            }],
+            'qty_reject' => 'required|integer|min:1',
+            'jenis_reject' => 'required|in:sublayer,ga,process',
+        ], [
+            'alasan_reject.required' => 'Alasan reject wajib diisi.',
+            'qty_reject.required' => 'Qty reject wajib diisi.',
+            'qty_reject.min' => 'Qty reject harus lebih besar dari 0.',
+            'jenis_reject.required' => 'Jenis reject wajib dipilih.',
+        ]);
+
+        $laporan = LaporanHarian::with(['produk', 'rejectDetails'])->findOrFail($validated['laporan_harian_id']);
+
+        if ($laporan->status === 'locked') {
+            return back()->withErrors(['laporan_harian_id' => 'Data produksi yang sudah dikunci tidak dapat direject.']);
+        }
+
+        $availableQty = $laporan->output_fisik ?? $laporan->capacity_fisik ?? 0;
+        if ($availableQty <= 0) {
+            return back()->withErrors(['qty_reject' => 'Quantity produk tidak tersedia atau belum diisi.']);
+        }
+
+        $totalExisting = (int) $laporan->rejectDetails()->sum('jumlah');
+        $sisa = $availableQty - $totalExisting;
+
+        if ($sisa <= 0) {
+            return back()->withErrors(['qty_reject' => 'Qty reject tidak boleh melebihi qty produk yang tersedia. Sisa: 0']);
+        }
+
+        if ($validated['qty_reject'] > $sisa) {
+            return back()->withErrors(['qty_reject' => "Qty reject tidak boleh melebihi qty produk yang tersedia. Sisa: {$sisa}"]);
+        }
+
+        $jenisToStore = $validated['jenis_reject'];
+        $alasan = trim($validated['alasan_reject']);
+
+        $rejectRecord = null;
+        try {
+            DB::transaction(function () use ($laporan, $jenisToStore, $validated, $alasan, $user, &$rejectRecord) {
+                $rejectRecord = RejectDetail::create([
+                    'laporan_harian_id' => $laporan->id,
+                    'jenis_reject' => $jenisToStore,
+                    'jumlah' => $validated['qty_reject'],
+                    'keterangan' => $alasan,
+                    'created_by' => $user->id,
+                ]);
+            });
+
+            // Otomatis kirim ke Scrap Order Odoo jika pengaturan aktif
+            if ($rejectRecord && Setting::get('odoo_auto_push_reject', config('odoo.reject.auto_push_on_submit', false))) {
+                try {
+                    app(OdooService::class)->pushRejectToOdoo($rejectRecord);
+                } catch (\Throwable $odooErr) {
+                    Log::warning('Auto push reject ke Odoo gagal: '.$odooErr->getMessage());
+                }
+            }
+        } catch (\Throwable $e) {
+            return back()->withErrors(['error' => 'Gagal menyimpan data reject. Silakan coba lagi.']);
+        }
+
+        return back()->with('success', 'Reject produk berhasil disimpan.');
+    }
+
+    /**
+     * Kirim data reject lokal ke Scrap Order Odoo ERP
+     */
+    public function pushToOdoo(RejectDetail $rejectDetail, OdooService $odooService)
+    {
+        $user = auth()->user();
+        if ($user->hasRole('manager')) {
+            abort(403, 'Manager hanya memiliki akses baca.');
+        }
+
+        try {
+            $odooService->reloadConfig();
+            $result = $odooService->pushRejectToOdoo($rejectDetail);
+            if ($result['success']) {
+                return back()->with('success', "Item reject berhasil dikirim ke Odoo sebagai Scrap Order #{$result['odoo_scrap_id']}");
+            }
+
+            return back()->withErrors(['error' => $result['message'] ?? 'Gagal push reject ke Odoo.']);
+        } catch (\Throwable $e) {
+            return back()->withErrors(['error' => 'Gagal push ke Odoo: '.$e->getMessage()]);
+        }
+    }
+
+    /**
+     * Hapus item reject
+     */
+    public function destroy(RejectDetail $rejectDetail)
+    {
+        $user = auth()->user();
+        if ($user->hasRole('manager')) {
+            abort(403, 'Manager hanya memiliki akses baca.');
+        }
+
+        $laporan = $rejectDetail->laporanHarian;
+        if ($laporan && $laporan->status === 'locked') {
+            return back()->withErrors(['error' => 'Data reject tidak dapat dihapus karena laporan produksi sudah dikunci.']);
+        }
+
+        if ($user->hasAnyRole(['leader', 'operator']) && $rejectDetail->created_by !== $user->id) {
+            return back()->withErrors(['error' => 'Anda hanya dapat menghapus data reject yang Anda input sendiri.']);
+        }
+
+        $rejectDetail->delete();
+
+        return back()->with('success', 'Data reject berhasil dihapus.');
+    }
+
+    /**
+     * Pull dan sync data reject dari MO Odoo yang sudah Done.
+     */
+    public function syncFromOdoo(OdooService $odooService)
+    {
+        $user = auth()->user();
+        if ($user->hasRole('manager')) {
+            abort(403, 'Manager hanya memiliki akses baca.');
+        }
+
+        try {
+            $summary = $odooService->syncMoRejects();
+            $msg = "Sync Reject MO Odoo selesai: {$summary['created']} item baru, {$summary['updated']} diperbarui.";
+            if (! empty($summary['errors'])) {
+                $msg .= ' Error: '.implode(', ', $summary['errors']);
+            }
+
+            return back()->with('success', $msg);
+        } catch (\Throwable $e) {
+            return back()->withErrors(['error' => 'Gagal sync Reject dari Odoo: '.$e->getMessage()]);
+        }
+    }
+}
