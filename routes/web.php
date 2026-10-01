@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\BrandingSettingController;
+use App\Http\Controllers\Admin\FinanceSettingController;
 use App\Http\Controllers\Admin\HistoryController;
 use App\Http\Controllers\Admin\HrisSettingController;
 use App\Http\Controllers\Admin\OdooSyncController;
@@ -58,6 +59,12 @@ Route::middleware(['auth', 'role:superadmin|admin|ppic|manager'])->prefix('admin
     Route::post('settings/hris', [HrisSettingController::class, 'update'])->name('settings.hris.update');
     Route::post('settings/hris/test', [HrisSettingController::class, 'testConnection'])->name('settings.hris.test');
     Route::post('settings/hris/sync', [HrisSettingController::class, 'syncNow'])->name('settings.hris.sync');
+
+    // Finance Monitoring Integration Settings
+    Route::get('settings/finance', [FinanceSettingController::class, 'index'])->name('settings.finance.index');
+    Route::post('settings/finance', [FinanceSettingController::class, 'update'])->name('settings.finance.update');
+    Route::post('settings/finance/test', [FinanceSettingController::class, 'testConnection'])->name('settings.finance.test');
+    Route::post('settings/finance/sync', [FinanceSettingController::class, 'syncNow'])->name('settings.finance.sync');
 });
 
 Route::middleware(['auth', 'role:superadmin|admin|ppic|manager|leader|spv'])->prefix('admin')->name('admin.')->group(function () {
