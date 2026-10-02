@@ -3,24 +3,27 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Services\FinanceProductionSyncService;
+use App\Services\HrisProductionSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class ProductionMetricsApiController extends Controller
 {
     /**
-     * Inbound API for Finance & HRIS to pull monthly production metrics.
+     * Inbound API for Finance & HRIS to pull monthly production and SCM metrics.
      */
-    public function getMetrics(Request $request, FinanceProductionSyncService $syncService): JsonResponse
+    public function getMetrics(Request $request, HrisProductionSyncService $syncService): JsonResponse
     {
         $period = $request->get('period') ?: date('Y-m');
         $payload = $syncService->gatherMonthlyPayload($period);
 
         return response()->json([
             'status' => 'success',
-            'message' => "Data produksi periode {$period} berhasil diambil.",
+            'success' => true,
+            'message' => "Data produksi dan SCM periode {$period} berhasil diambil.",
             'data' => $payload,
+            'variables' => $payload['variables'] ?? [],
+            'metrics' => $payload['metrics'] ?? [],
         ]);
     }
 
@@ -31,7 +34,8 @@ class ProductionMetricsApiController extends Controller
     {
         return response()->json([
             'status' => 'success',
-            'message' => 'Sistem Produksi API online dan terhubung.',
+            'success' => true,
+            'message' => 'Sistem Produksi & SCM API online dan terhubung.',
             'timestamp' => now()->toIso8601String(),
         ]);
     }
