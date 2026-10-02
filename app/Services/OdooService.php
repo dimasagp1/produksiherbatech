@@ -266,13 +266,17 @@ class OdooService
     /**
      * Search and read records from Odoo
      */
-    public function searchRead(string $model, array $domain = [], array $fields = [], int $limit = 500, int $offset = 0): array
+    public function searchRead(string $model, array $domain = [], array $fields = [], int $limit = 500, int $offset = 0, ?string $order = null): array
     {
         $kwargs = [
             'fields' => $fields,
             'limit' => $limit,
             'offset' => $offset,
         ];
+
+        if ($order !== null) {
+            $kwargs['order'] = $order;
+        }
 
         $result = $this->executeKw($model, 'search_read', [$domain], $kwargs);
 
@@ -560,7 +564,7 @@ class OdooService
      *
      * @return array<int, array<string, mixed>>
      */
-    public function fetchManufacturingOrders(array $domain = []): array
+    public function fetchManufacturingOrders(array $domain = [], int $limit = 5000): array
     {
         $domain = $domain !== [] ? $domain : [
             ['state', 'in', ['confirmed', 'progress', 'done', 'cancel']],
@@ -569,8 +573,9 @@ class OdooService
         return $this->searchRead('mrp.production', $domain, [
             'id', 'name', 'origin', 'state',
             'product_id', 'product_qty', 'bom_id',
+            'lot_producing_id',
             'date_start', 'date_finished',
-        ], 500);
+        ], $limit, 0, 'id desc');
     }
 
     /**
@@ -594,6 +599,10 @@ class OdooService
             'cancelled' => 'cancelled',
         ];
 
+        $existingPlans = WeeklyPlan::withTrashed()->whereNotNull('odoo_mo_id')->get()->keyBy('odoo_mo_id');
+        $localProduks = Produk::whereNotNull('odoo_id')->get()->keyBy('odoo_id');
+        $fallbackCreator = $this->fallbackCreatorId();
+
         foreach ($raw as $item) {
             $odooMoId = (int) ($item['id'] ?? 0);
             if ($odooMoId <= 0) {
@@ -605,15 +614,13 @@ class OdooService
             $produkId = is_array($item['product_id'] ?? null) ? (int) $item['product_id'][0] : (int) ($item['product_id'] ?? 0);
 
             try {
-                $plan = WeeklyPlan::withTrashed()->where('odoo_mo_id', $odooMoId)->first();
+                $plan = $existingPlans->get($odooMoId);
 
                 if ($moStatus === 'cancelled') {
                     if ($plan && ! $plan->trashed()) {
                         $plan->applyOdooSync(['mo_status' => 'cancelled']);
                         $plan->delete();
                         $summary['cancelled']++;
-                    } elseif ($plan) {
-                        $summary['skipped']++;
                     } else {
                         $summary['skipped']++;
                     }
@@ -623,7 +630,7 @@ class OdooService
 
                 $batchNumber = $this->parseBatchFromMo($item);
                 $tanggal = $this->parseMoDate($item);
-                $produk = $produkId > 0 ? Produk::where('odoo_id', $produkId)->first() : null;
+                $produk = $produkId > 0 ? $localProduks->get($produkId) : null;
 
                 if (! $produk && $plan === null) {
                     $summary['errors'][] = "MO {$item['name']} ({$odooMoId}): produk Odoo #{$produkId} belum ada lokal";
@@ -639,24 +646,14 @@ class OdooService
                         'mo_status' => $moStatus,
                         'target_output' => $targetOutput > 0 ? $targetOutput : $plan->target_output,
                         'multiplier' => $plan->multiplier ?: $multiplier,
+                        'batch_number' => $batchNumber,
                     ]);
                     $summary['updated']++;
 
                     continue;
                 }
 
-                $duplicate = WeeklyPlan::withTrashed()
-                    ->where('batch_number', $batchNumber)
-                    ->where('tanggal', $tanggal)
-                    ->exists();
-                if ($duplicate) {
-                    $summary['errors'][] = "MO {$item['name']}: batch {$batchNumber} tanggal {$tanggal} sudah ada di plan lain";
-                    $summary['skipped']++;
-
-                    continue;
-                }
-
-                WeeklyPlan::create([
+                $newPlan = WeeklyPlan::create([
                     'produk_id' => $produk->id,
                     'line_id' => null,
                     'proses' => $produk->proses_default ?: 'mixing',
@@ -669,8 +666,9 @@ class OdooService
                     'packing_hold' => false,
                     'tanggal' => $tanggal,
                     'status' => 'draft',
-                    'created_by' => $this->fallbackCreatorId(),
+                    'created_by' => $fallbackCreator,
                 ]);
+                $existingPlans->put($odooMoId, $newPlan);
                 $summary['created']++;
             } catch (Exception $e) {
                 $summary['errors'][] = "MO #{$odooMoId}: ".$e->getMessage();
@@ -680,8 +678,32 @@ class OdooService
         return $summary;
     }
 
-    protected function parseBatchFromMo(array $item): string
+    public function parseBatchFromMo(array $item): string
     {
+        // 1. Lot / Serial Number dari Odoo mrp.production (lot_producing_id)
+        if (! empty($item['lot_producing_id'])) {
+            if (is_array($item['lot_producing_id']) && isset($item['lot_producing_id'][1]) && trim((string) $item['lot_producing_id'][1]) !== '') {
+                return trim((string) $item['lot_producing_id'][1]);
+            }
+            if (is_string($item['lot_producing_id']) && trim($item['lot_producing_id']) !== '') {
+                return trim($item['lot_producing_id']);
+            }
+        }
+
+        if (! empty($item['lot_id'])) {
+            if (is_array($item['lot_id']) && isset($item['lot_id'][1]) && trim((string) $item['lot_id'][1]) !== '') {
+                return trim((string) $item['lot_id'][1]);
+            }
+            if (is_string($item['lot_id']) && trim($item['lot_id']) !== '') {
+                return trim($item['lot_id']);
+            }
+        }
+
+        if (! empty($item['lot_name']) && is_string($item['lot_name']) && trim($item['lot_name']) !== '') {
+            return trim($item['lot_name']);
+        }
+
+        // 2. Fallback origin (e.g. "Batch: BATCH-001" atau "LinePulse - BATCH-001")
         $origin = trim((string) ($item['origin'] ?? ''));
         if ($origin !== '' && preg_match('/(?:Batch:\s*|LinePulse\s*-\s*)([A-Za-z0-9\-\/]+)/i', $origin, $matches)) {
             return trim($matches[1]);
@@ -690,6 +712,7 @@ class OdooService
             return $origin;
         }
 
+        // 3. Fallback MO Reference / name
         return trim((string) ($item['name'] ?? ('MO/'.($item['id'] ?? '0'))));
     }
 

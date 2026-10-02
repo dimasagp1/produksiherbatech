@@ -407,4 +407,41 @@ class PrdVPhaseATest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
     }
+
+    public function test_mo_sync_extracts_batch_from_lot_producing_id(): void
+    {
+        $ppic = $this->makeUser('ppic');
+
+        $diabalance = Produk::where('kode_produk', 'DB01')->firstOrFail();
+        $diabalance->update(['odoo_id' => 201]);
+
+        $fake = new FakeOdooService;
+        $fake->moPayload = [
+            [
+                'id' => 99,
+                'name' => 'PROD1/SEKUNDER/2026/01307',
+                'lot_producing_id' => [77, 'WO0726004'],
+                'origin' => 'SO/2026/001',
+                'state' => 'confirmed',
+                'product_id' => [201, 'Diabalance'],
+                'product_qty' => 6400,
+                'bom_id' => false,
+                'date_start' => '2026-07-14 11:09:06',
+                'date_finished' => null,
+            ],
+        ];
+
+        $this->app->instance(OdooService::class, $fake);
+
+        $this->actingAs($ppic)
+            ->post(route('ppic.odoo.mo-sync'))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $plan = WeeklyPlan::where('odoo_mo_id', 99)->firstOrFail();
+        $this->assertSame('WO0726004', $plan->batch_number);
+        $this->assertSame('confirmed', $plan->mo_status);
+        $this->assertSame(6400, $plan->target_output);
+        $this->assertSame('2026-07-14', $plan->tanggal);
+    }
 }

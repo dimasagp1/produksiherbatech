@@ -2,8 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\DeliveryPlan;
+use App\Models\DowntimeDetail;
 use App\Models\LaporanHarian;
+use App\Models\MaterialUsageItem;
+use App\Models\RejectDetail;
 use App\Models\Setting;
+use App\Models\StockOpnameItem;
+use App\Models\WeeklyPlan;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -12,9 +18,6 @@ class HrisProductionSyncService
 {
     /**
      * Kumpulkan dan hitung seluruh variabel metrik Produksi & SCM untuk periode tertentu.
-     *
-     * @param string|null $period
-     * @return array
      */
     public function gatherMonthlyPayload(?string $period = null): array
     {
@@ -41,7 +44,7 @@ class HrisProductionSyncService
         $plannedMachineHours = round($grossTimeMinutes / 60, 2);
 
         // Target Weekly Plan
-        $targetPlan = (float) \App\Models\WeeklyPlan::whereYear('tanggal', $year)
+        $targetPlan = (float) WeeklyPlan::whereYear('tanggal', $year)
             ->whereMonth('tanggal', $month)
             ->sum('target_output');
         if ($targetPlan <= 0 && $sumOutput > 0) {
@@ -49,22 +52,22 @@ class HrisProductionSyncService
         }
 
         // Downtime Mesin
-        $downtimeMinutes = (float) \App\Models\DowntimeDetail::whereHas('laporanHarian', function ($q) use ($startDate, $endDate) {
+        $downtimeMinutes = (float) DowntimeDetail::whereHas('laporanHarian', function ($q) use ($startDate, $endDate) {
             $q->whereBetween('tanggal', [$startDate, $endDate]);
         })->sum('durasi_menit');
         $totalDowntimeHours = round($downtimeMinutes / 60, 2);
 
         // Reject / Scrap
-        $totalLossQty = (float) \App\Models\RejectDetail::whereHas('laporanHarian', function ($q) use ($startDate, $endDate) {
+        $totalLossQty = (float) RejectDetail::whereHas('laporanHarian', function ($q) use ($startDate, $endDate) {
             $q->whereBetween('tanggal', [$startDate, $endDate]);
         })->sum('jumlah');
 
         // 2. Data Supply Chain (Material Usage, Stock Opname, Delivery)
-        $usageActual = (float) \App\Models\MaterialUsageItem::whereHas('usage', function ($q) use ($startDate, $endDate) {
+        $usageActual = (float) MaterialUsageItem::whereHas('usage', function ($q) use ($startDate, $endDate) {
             $q->whereBetween('usage_date', [$startDate, $endDate]);
         })->sum('quantity_used');
 
-        $usageStandard = (float) \App\Models\MaterialUsageItem::whereHas('usage', function ($q) use ($startDate, $endDate) {
+        $usageStandard = (float) MaterialUsageItem::whereHas('usage', function ($q) use ($startDate, $endDate) {
             $q->whereBetween('usage_date', [$startDate, $endDate]);
         })->sum('quantity_standard');
 
@@ -72,11 +75,11 @@ class HrisProductionSyncService
             $usageStandard = $usageActual;
         }
 
-        $soDiffValue = (float) \App\Models\StockOpnameItem::whereHas('opname', function ($q) use ($startDate, $endDate) {
-            $q->whereBetween('initiated_at', [$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+        $soDiffValue = (float) StockOpnameItem::whereHas('opname', function ($q) use ($startDate, $endDate) {
+            $q->whereBetween('initiated_at', [$startDate.' 00:00:00', $endDate.' 23:59:59']);
         })->sum('discrepancy');
 
-        $deliveryPlans = \App\Models\DeliveryPlan::whereBetween('planned_date', [$startDate, $endDate])->get();
+        $deliveryPlans = DeliveryPlan::whereBetween('planned_date', [$startDate, $endDate])->get();
         $totalDeliveries = $deliveryPlans->count();
         $otdCount = $deliveryPlans->where('on_time', true)->count();
         $ifdCount = $deliveryPlans->where('in_full', true)->count();
@@ -193,7 +196,7 @@ class HrisProductionSyncService
                         'metrics' => $metricsPayload,
                     ]);
             } catch (\Throwable $e2) {
-                Log::info("SCM Ingestion secondary sync note: " . $e2->getMessage());
+                Log::info('SCM Ingestion secondary sync note: '.$e2->getMessage());
             }
 
             $isSuccess = $response->successful();

@@ -36,7 +36,14 @@ interface WeeklyPlan {
     proses: string;
     batch_number: string;
     status: string;
+    odoo_mo_id?: number | null;
+    mo_status?: string;
+    target_output?: number;
+    mp_count?: number;
+    multiplier?: number;
+    line_id?: number | null;
     produk?: Produk;
+    line?: Line | null;
 }
 
 const props = defineProps<{
@@ -72,7 +79,7 @@ const form = useForm({
 const selectedProduk = ref<Produk | null>(null);
 const selectedMesin = ref<Mesin | null>(null);
 const selectedWeeklyPlan = ref<WeeklyPlan | null>(null);
-const selectedProses = ref('');
+const selectedWeeklyPlanId = ref('');
 
 const prosesLabel: Record<string, string> = {
     mixing: 'Mixing',
@@ -84,92 +91,118 @@ const prosesLabel: Record<string, string> = {
 const availablePlans = computed(() => {
     if (!form.tanggal) return [];
     return props.weeklyPlans.filter(
-        (wp) => wp.tanggal === form.tanggal && wp.status === 'aktif',
+        (wp) =>
+            wp.tanggal === form.tanggal &&
+            (wp.status === 'aktif' || wp.status === 'draft') &&
+            wp.mo_status !== 'cancelled',
     );
 });
 
-// Available products: only those with active weekly plan on selected tanggal
+// Available products: only those with weekly plan on selected tanggal
 const availableProduks = computed(() => {
     const ids = new Set(availablePlans.value.map((wp) => wp.produk_id));
     return props.produks.filter((p) => ids.has(p.id));
 });
 
-// Available processes for selected product (can be multiple)
-const availableProses = computed(() => {
+// Available plans for selected product (can be multiple batches/processes)
+const availablePlansForProduk = computed(() => {
     if (!form.produk_id) return [];
     return availablePlans.value.filter(
         (wp) => wp.produk_id === Number(form.produk_id),
     );
 });
 
-// When tanggal changes → reset product selection
-watch(
-    () => form.tanggal,
-    () => {
-        form.produk_id = '';
-        form.weekly_plan_id = '';
-        form.proses = '';
-        form.batch_number = '';
-        selectedProduk.value = null;
-        selectedWeeklyPlan.value = null;
-        selectedProses.value = '';
-    },
-);
-
-// When produk selected → show available processes (if multiple, user picks)
-watch(
-    () => form.produk_id,
-    (id) => {
-        if (!id) {
-            selectedProduk.value = null;
-            selectedWeeklyPlan.value = null;
-            form.weekly_plan_id = '';
-            form.proses = '';
-            form.batch_number = '';
-            selectedProses.value = '';
-            return;
-        }
-        selectedProduk.value =
-            props.produks.find((x) => x.id === Number(id)) ?? null;
-        const plans = availablePlans.value.filter(
-            (w) => w.produk_id === Number(id),
-        );
-
-        if (plans.length === 1) {
-            const wp = plans[0];
-            selectedWeeklyPlan.value = wp;
-            selectedProses.value = wp.proses;
-            form.weekly_plan_id = String(wp.id);
-            form.proses = wp.proses;
-            form.batch_number = wp.batch_number;
-        } else if (plans.length > 1) {
-            selectedWeeklyPlan.value = null;
-            selectedProses.value = '';
-            form.weekly_plan_id = '';
-            form.proses = '';
-            form.batch_number = '';
-        }
-    },
-);
-
-// When user picks a process → find matching weekly plan
-watch(selectedProses, (proses) => {
-    if (!proses || !form.produk_id) {
-        selectedWeeklyPlan.value = null;
+function applyWeeklyPlan(wp: WeeklyPlan | null) {
+    selectedWeeklyPlan.value = wp;
+    if (!wp) {
         form.weekly_plan_id = '';
         form.proses = '';
         form.batch_number = '';
         return;
     }
-    const wp = availablePlans.value.find(
-        (w) => w.produk_id === Number(form.produk_id) && w.proses === proses,
-    );
-    selectedWeeklyPlan.value = wp ?? null;
-    if (wp) {
-        form.weekly_plan_id = String(wp.id);
-        form.proses = wp.proses;
-        form.batch_number = wp.batch_number;
+
+    form.weekly_plan_id = String(wp.id);
+    form.proses = wp.proses;
+    form.batch_number = wp.batch_number;
+
+    if (wp.line_id) {
+        form.line_id = String(wp.line_id);
     }
+
+    // Auto-fill Target & Capacity based on Odoo / Weekly Plan
+    const targetOutput = Number(wp.target_output) || 0;
+    const mpCount = Number(wp.mp_count) || 0;
+    const multiplierVal = Number(wp.multiplier) || 2000;
+
+    if (targetOutput > 0) {
+        if (mpCount > 0) {
+            form.total_mp = String(mpCount);
+            form.target_mp = String(
+                wp.multiplier ? wp.multiplier : Math.round(targetOutput / mpCount),
+            );
+            form.capacity_fisik = String(targetOutput);
+        } else {
+            // Fresh from Odoo MO (MP count not set yet)
+            form.total_mp = '1';
+            form.target_mp = String(targetOutput);
+            form.capacity_fisik = String(targetOutput);
+        }
+    } else if (mpCount > 0) {
+        form.total_mp = String(mpCount);
+        form.target_mp = String(multiplierVal);
+        form.capacity_fisik = String(mpCount * multiplierVal);
+    } else {
+        form.total_mp = '1';
+        form.target_mp = String(multiplierVal);
+        form.capacity_fisik = String(multiplierVal);
+    }
+}
+
+// When tanggal changes → reset product selection
+watch(
+    () => form.tanggal,
+    () => {
+        form.produk_id = '';
+        selectedWeeklyPlanId.value = '';
+        selectedProduk.value = null;
+        applyWeeklyPlan(null);
+    },
+);
+
+// When produk selected → handle single vs multiple plans
+watch(
+    () => form.produk_id,
+    (id) => {
+        if (!id) {
+            selectedProduk.value = null;
+            selectedWeeklyPlanId.value = '';
+            applyWeeklyPlan(null);
+            return;
+        }
+        selectedProduk.value =
+            props.produks.find((x) => x.id === Number(id)) ?? null;
+        const plans = availablePlansForProduk.value;
+
+        if (plans.length === 1) {
+            selectedWeeklyPlanId.value = String(plans[0].id);
+            applyWeeklyPlan(plans[0]);
+        } else {
+            selectedWeeklyPlanId.value = '';
+            applyWeeklyPlan(null);
+        }
+    },
+);
+
+// When user selects a specific plan ID from dropdown
+watch(selectedWeeklyPlanId, (id) => {
+    if (!id) {
+        if (availablePlansForProduk.value.length > 1) {
+            applyWeeklyPlan(null);
+        }
+        return;
+    }
+    const wp = props.weeklyPlans.find((w) => w.id === Number(id)) ?? null;
+    applyWeeklyPlan(wp);
 });
 
 // Auto-calculate Capacity Fisik = Target MP × Total MP
@@ -185,7 +218,6 @@ watch(
     () => {
         form.capacity_fisik = String(capacityFisikAuto.value);
     },
-    { immediate: true },
 );
 
 // Auto-lookup mesin CT
@@ -201,24 +233,34 @@ const ct = computed(() => selectedMesin.value?.ct ?? 0);
 
 // Handle preselect from query params (parallel flow redirect)
 onMounted(() => {
-    if (props.preselect?.produk_id && props.preselect?.proses) {
+    if (props.preselect?.weekly_plan_id) {
         const wp = props.weeklyPlans.find(
-            (w) =>
-                w.produk_id === Number(props.preselect!.produk_id) &&
-                w.proses === props.preselect!.proses &&
-                w.status === 'aktif',
+            (w) => w.id === Number(props.preselect!.weekly_plan_id),
         );
         if (wp) {
             form.tanggal = wp.tanggal;
             form.produk_id = String(wp.produk_id);
-            form.weekly_plan_id = String(wp.id);
-            form.proses = wp.proses;
-            form.batch_number = wp.batch_number;
             selectedProduk.value =
                 props.produks.find((p) => p.id === Number(wp.produk_id)) ??
                 null;
-            selectedWeeklyPlan.value = wp;
-            selectedProses.value = wp.proses;
+            selectedWeeklyPlanId.value = String(wp.id);
+            applyWeeklyPlan(wp);
+        }
+    } else if (props.preselect?.produk_id) {
+        const wp = props.weeklyPlans.find(
+            (w) =>
+                w.produk_id === Number(props.preselect!.produk_id) &&
+                (!props.preselect?.proses ||
+                    w.proses === props.preselect!.proses),
+        );
+        if (wp) {
+            form.tanggal = wp.tanggal;
+            form.produk_id = String(wp.produk_id);
+            selectedProduk.value =
+                props.produks.find((p) => p.id === Number(wp.produk_id)) ??
+                null;
+            selectedWeeklyPlanId.value = String(wp.id);
+            applyWeeklyPlan(wp);
         }
     }
 });
@@ -347,44 +389,42 @@ function submit() {
                                     class="mt-1"
                                 />
                             </div>
-                            <!-- Proses selector (only when product has multiple processes) -->
+                            <!-- Batch / Proses selector (when product has multiple batches/processes on date) -->
                             <div
                                 v-if="
-                                    form.produk_id && availableProses.length > 1
+                                    form.produk_id &&
+                                    availablePlansForProduk.length > 1
                                 "
                             >
-                                <InputLabel value="Proses" />
+                                <InputLabel value="Batch / Proses (Odoo Plan)" />
                                 <select
-                                    v-model="selectedProses"
+                                    v-model="selectedWeeklyPlanId"
                                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                                     required
                                 >
                                     <option value="" disabled>
-                                        Pilih Proses
+                                        Pilih Batch / Proses
                                     </option>
                                     <option
-                                        v-for="wp in availableProses"
+                                        v-for="wp in availablePlansForProduk"
                                         :key="wp.id"
-                                        :value="wp.proses"
+                                        :value="String(wp.id)"
                                     >
-                                        {{
-                                            prosesLabel[wp.proses] ?? wp.proses
-                                        }}
+                                        {{ prosesLabel[wp.proses] ?? wp.proses }} — Batch: {{ wp.batch_number }} {{ wp.target_output ? `(Target: ${Number(wp.target_output).toLocaleString('id-ID')} pcs)` : '' }}
                                     </option>
                                 </select>
                                 <p
                                     class="mt-1 text-xs text-gray-500 dark:text-gray-400"
                                 >
                                     Produk ini memiliki
-                                    {{ availableProses.length }} proses. Pilih
-                                    yang ingin dikerjakan.
+                                    {{ availablePlansForProduk.length }} batch/rencana kerja pada tanggal ini.
                                 </p>
                             </div>
                             <!-- Proses (auto when single plan) -->
                             <div v-else-if="form.proses">
                                 <InputLabel value="Proses" />
                                 <div
-                                    class="mt-1 rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-900 dark:bg-gray-700 dark:text-gray-100"
+                                    class="mt-1 rounded-md bg-gray-50 px-3 py-2 text-sm font-medium text-gray-900 dark:bg-gray-700 dark:text-gray-100"
                                 >
                                     {{
                                         prosesLabel[form.proses] ?? form.proses
@@ -402,9 +442,15 @@ function submit() {
                             <div>
                                 <InputLabel value="Batch Number" />
                                 <div
-                                    class="mt-1 rounded-md bg-gray-50 px-3 py-2 font-mono text-sm text-gray-900 dark:bg-gray-700 dark:text-gray-100"
+                                    class="mt-1 flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 font-mono text-sm text-gray-900 dark:bg-gray-700 dark:text-gray-100"
                                 >
-                                    {{ form.batch_number || '-' }}
+                                    <span>{{ form.batch_number || '-' }}</span>
+                                    <span
+                                        v-if="selectedWeeklyPlan?.odoo_mo_id"
+                                        class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300"
+                                    >
+                                        Odoo MO #{{ selectedWeeklyPlan.odoo_mo_id }}
+                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -415,23 +461,39 @@ function submit() {
                         v-if="selectedWeeklyPlan"
                         class="rounded-lg border border-indigo-200 bg-indigo-50 p-4 dark:border-indigo-800 dark:bg-indigo-900/30"
                     >
-                        <p
-                            class="text-sm font-medium text-indigo-800 dark:text-indigo-200"
-                        >
-                            Weekly Plan Ditemukan
-                        </p>
-                        <p
-                            class="mt-1 text-xs text-indigo-700 dark:text-indigo-300"
-                        >
-                            Proses
-                            <span class="font-semibold">{{
-                                prosesLabel[selectedWeeklyPlan.proses]
-                            }}</span>
-                            — Batch
-                            <span class="font-mono font-semibold">{{
-                                selectedWeeklyPlan.batch_number
-                            }}</span>
-                        </p>
+                        <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p
+                                    class="text-sm font-medium text-indigo-800 dark:text-indigo-200"
+                                >
+                                    Weekly Plan / Batch Odoo Ditemukan
+                                </p>
+                                <p
+                                    class="mt-1 text-xs text-indigo-700 dark:text-indigo-300"
+                                >
+                                    Proses
+                                    <span class="font-semibold">{{
+                                        prosesLabel[selectedWeeklyPlan.proses] ?? selectedWeeklyPlan.proses
+                                    }}</span>
+                                    — Batch
+                                    <span class="font-mono font-semibold">{{
+                                        selectedWeeklyPlan.batch_number
+                                    }}</span>
+                                    <span
+                                        v-if="selectedWeeklyPlan.target_output"
+                                        class="ml-1 font-semibold text-indigo-900 dark:text-indigo-100"
+                                    >
+                                        (Target: {{ Number(selectedWeeklyPlan.target_output).toLocaleString('id-ID') }} pcs)
+                                    </span>
+                                </p>
+                            </div>
+                            <span
+                                v-if="selectedWeeklyPlan.odoo_mo_id"
+                                class="mt-1 inline-flex w-fit items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200 sm:mt-0"
+                            >
+                                Odoo MO #{{ selectedWeeklyPlan.odoo_mo_id }}
+                            </span>
+                        </div>
                     </div>
 
                     <!-- Mesin & Line -->
@@ -505,11 +567,19 @@ function submit() {
                     <div
                         class="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800"
                     >
-                        <h3
-                            class="mb-4 text-sm font-semibold uppercase text-gray-500 dark:text-gray-400"
-                        >
-                            Target & Capacity
-                        </h3>
+                        <div class="mb-4 flex items-center justify-between">
+                            <h3
+                                class="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400"
+                            >
+                                Target & Capacity
+                            </h3>
+                            <span
+                                v-if="selectedWeeklyPlan?.target_output"
+                                class="text-xs font-medium text-indigo-600 dark:text-indigo-400"
+                            >
+                                Dari Odoo: {{ Number(selectedWeeklyPlan.target_output).toLocaleString('id-ID') }} pcs (Batch: {{ selectedWeeklyPlan.batch_number }})
+                            </span>
+                        </div>
                         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                             <div>
                                 <InputLabel value="Target Output" />
@@ -521,6 +591,10 @@ function submit() {
                                     class="no-spinner mt-1 block w-full"
                                     required
                                 />
+                                <InputError
+                                    :message="form.errors.target_mp"
+                                    class="mt-1"
+                                />
                             </div>
                             <div>
                                 <InputLabel value="Total MP" />
@@ -530,6 +604,10 @@ function submit() {
                                     min="1"
                                     class="no-spinner mt-1 block w-full"
                                     required
+                                />
+                                <InputError
+                                    :message="form.errors.total_mp"
+                                    class="mt-1"
                                 />
                             </div>
                             <div>
@@ -549,6 +627,10 @@ function submit() {
                                 >
                                     Otomatis: Target Output × Total MP
                                 </p>
+                                <InputError
+                                    :message="form.errors.capacity_fisik"
+                                    class="mt-1"
+                                />
                             </div>
                         </div>
                     </div>

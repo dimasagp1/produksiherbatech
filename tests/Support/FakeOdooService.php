@@ -15,7 +15,7 @@ class FakeOdooService extends OdooService
     /** @var array<int, array<string, mixed>> */
     public array $saleOrderPayload = [];
 
-    public function fetchManufacturingOrders(array $domain = []): array
+    public function fetchManufacturingOrders(array $domain = [], int $limit = 5000): array
     {
         return $this->moPayload;
     }

@@ -51,7 +51,10 @@ class LaporanHarianController extends Controller
         $mesins = Mesin::aktif()->get();
         $lines = Line::aktif()->get();
         $alasanDowntimes = AlasanDowntime::aktif()->get();
-        $weeklyPlans = WeeklyPlan::with('produk')->where('status', 'aktif')->get();
+        $weeklyPlans = WeeklyPlan::with(['produk', 'line'])
+            ->whereIn('status', ['aktif', 'draft'])
+            ->where('mo_status', '!=', WeeklyPlan::MO_STATUS_CANCELLED)
+            ->get();
 
         return Inertia::render('Leader/LaporanHarian/Create', [
             'produks' => $produks,
@@ -71,9 +74,10 @@ class LaporanHarianController extends Controller
     {
         $request->validate(['tanggal' => 'required|date']);
 
-        $plans = WeeklyPlan::with('produk')
+        $plans = WeeklyPlan::with(['produk', 'line'])
             ->where('tanggal', $request->tanggal)
-            ->where('status', 'aktif')
+            ->whereIn('status', ['aktif', 'draft'])
+            ->where('mo_status', '!=', WeeklyPlan::MO_STATUS_CANCELLED)
             ->get();
 
         return response()->json($plans);
@@ -97,6 +101,10 @@ class LaporanHarianController extends Controller
         ]);
 
         $weeklyPlan = WeeklyPlan::findOrFail($validated['weekly_plan_id']);
+
+        if ($weeklyPlan->status === 'draft') {
+            $weeklyPlan->update(['status' => 'aktif']);
+        }
 
         // Cegah duplikasi: 1 weekly plan (produk+proses+batch+tanggal) hanya boleh 1 laporan
         // Termasuk soft-deleted? cek hanya yang belum dihapus agar laporan yang dihapus bisa dibuat ulang
