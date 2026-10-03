@@ -19,9 +19,20 @@ interface UserCreator {
     name: string;
 }
 
+interface Produk {
+    id: number;
+    nama_produk: string;
+    kode_produk?: string;
+    odoo_uom?: string;
+}
+
 interface RejectDetailItem {
     id: number;
     laporan_harian_id: number;
+    material_name?: string | null;
+    material_uom?: string | null;
+    odoo_mo_id?: number | null;
+    odoo_mo_name?: string | null;
     jenis_reject: 'sublayer' | 'ga' | 'process';
     jumlah: number;
     keterangan: string | null;
@@ -30,12 +41,13 @@ interface RejectDetailItem {
     created_at: string;
     created_by: number;
     creator?: UserCreator;
-}
-
-interface Produk {
-    id: number;
-    nama_produk: string;
-    kode_produk?: string;
+    laporan_harian?: {
+        id: number;
+        batch_number: string;
+        proses: string;
+        tanggal: string;
+        produk?: Produk;
+    };
 }
 
 interface LaporanItem {
@@ -62,10 +74,16 @@ const props = defineProps<{
         per_page: number;
         total: number;
     };
-    rejectDetails?: any;
+    rejectDetails?: {
+        data: RejectDetailItem[];
+        current_page: number;
+        last_page: number;
+        per_page: number;
+        total: number;
+    };
     produks?: { id: number; kode_produk: string; nama_produk: string }[];
     search: string;
-    filter?: 'all' | 'has_reject' | 'odoo';
+    filter?: 'all' | 'has_reject' | 'odoo' | 'ga' | 'sublayer' | 'process';
     month?: string;
     start_date?: string;
     end_date?: string;
@@ -73,6 +91,10 @@ const props = defineProps<{
     sort_by?: string;
     stats?: {
         total_reject_pcs?: number;
+        total_reject_ga?: number;
+        total_reject_sup?: number;
+        total_reject_loss?: number;
+        total_records?: number;
     };
 }>();
 
@@ -86,10 +108,10 @@ const isManager = computed(
 const currentUserId = computed(() => (page.props.auth as any)?.user?.id);
 const currentUserRole = computed(() => (page.props.auth as any)?.user?.role);
 
-// Tabs: Only 2 main views
-const activeTab = ref<'local' | 'odoo'>('local');
+// Tabs: 3 Main Views
+const activeTab = ref<'local' | 'breakdown' | 'odoo'>('local');
 const search = ref(props.search ?? '');
-const currentFilter = ref<'all' | 'has_reject' | 'odoo'>(props.filter ?? 'all');
+const currentFilter = ref(props.filter ?? 'all');
 const selectedMonth = ref(props.month ?? '');
 const selectedStartDate = ref(props.start_date ?? '');
 const selectedEndDate = ref(props.end_date ?? '');
@@ -101,13 +123,12 @@ const showModal = ref(false);
 const showConfirm = ref(false);
 const isSubmitting = ref(false);
 
-// Accordion / Dropdown state for Local Production Batches
+// Accordion states
 const expandedBatches = ref<Record<number, boolean>>({});
 function toggleBatchExpand(id: number) {
     expandedBatches.value[id] = !expandedBatches.value[id];
 }
 
-// Accordion / Dropdown state for Odoo Scraps
 const expandedOdooScraps = ref<Record<number, boolean>>({});
 function toggleOdooScrapExpand(id: number) {
     expandedOdooScraps.value[id] = !expandedOdooScraps.value[id];
@@ -240,9 +261,9 @@ const form = ref({
 const errors = ref<Record<string, string>>({});
 
 const jenisOptions = [
-    { value: 'sublayer', label: 'Reject Sublayer' },
-    { value: 'ga', label: 'Reject GA' },
-    { value: 'process', label: 'Proses' },
+    { value: 'sublayer', label: 'Reject Sublayer / Supplier' },
+    { value: 'ga', label: 'Reject GA / QA' },
+    { value: 'process', label: 'Reject Proses / Loss' },
 ];
 
 const prosesLabel: Record<string, string> = {
@@ -256,24 +277,78 @@ function getJenisBadge(jenis: string) {
     switch (jenis) {
         case 'sublayer':
             return {
-                label: 'Reject Sublayer',
-                class: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+                label: 'Reject Supplier',
+                class: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800',
             };
         case 'ga':
             return {
-                label: 'Reject GA',
-                class: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+                label: 'Reject QA / GA',
+                class: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800',
             };
         case 'process':
             return {
-                label: 'Reject Proses',
-                class: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
+                label: 'Reject Proses (Loss)',
+                class: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800',
             };
         default:
             return {
                 label: jenis,
-                class: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
+                class: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700',
             };
+    }
+}
+
+function getItemCategory(name?: string | null): { type: 'kemas' | 'ruahan' | 'fg' | 'rm'; label: string; class: string; icon: string; canDecompose: boolean } {
+    if (!name) return { type: 'fg', label: 'Produk Jadi', class: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800', icon: '🏷️', canDecompose: true };
+    const n = name.toLowerCase();
+    if (n.includes('label') || n.includes('dusbox') || n.includes('botol') || n.includes('tutup') || n.includes('masterbox') || n.includes('segel') || n.includes('shrink') || n.includes('sendok') || n.includes('box') || n.includes('kemasan')) {
+        return { type: 'kemas', label: 'Bahan Kemas', class: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800', icon: '📦', canDecompose: false };
+    }
+    if (n.includes('ruahan')) {
+        return { type: 'ruahan', label: 'Ruahan (WIP)', class: 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800', icon: '🍶', canDecompose: true };
+    }
+    if (n.includes('ekstrak') || n.includes('minyak') || n.includes('madu') || n.includes('syrup') || n.includes('creamer') || n.includes('flavour') || n.includes('gum') || n.includes('foam') || n.includes('beras') || n.includes('milk') || n.includes('tcp') || n.includes('sugar') || n.includes('salt') || n.includes('curcuma')) {
+        return { type: 'rm', label: 'Bahan Baku', class: 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/40 dark:text-teal-300 dark:border-teal-800', icon: '🧪', canDecompose: false };
+    }
+    return { type: 'fg', label: 'Produk Jadi', class: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800', icon: '🏷️', canDecompose: true };
+}
+
+// Recipe Modal State
+const showRecipeModal = ref(false);
+const recipeLoading = ref(false);
+const recipeError = ref<string | null>(null);
+const activeRecipe = ref<any>(null);
+const activeRecipeItem = ref<RejectDetailItem | null>(null);
+
+async function openRecipeBreakdown(item: RejectDetailItem) {
+    activeRecipeItem.value = item;
+    showRecipeModal.value = true;
+    recipeLoading.value = true;
+    recipeError.value = null;
+    activeRecipe.value = null;
+
+    try {
+        const matName = item.material_name || item.laporan_harian?.produk?.nama_produk || '';
+        const parentName = item.laporan_harian?.produk?.nama_produk || '';
+        const qty = item.jumlah || 1;
+
+        const res = await axios.get(route('reject.recipe-breakdown'), {
+            params: {
+                material_name: matName,
+                qty: qty,
+                parent_product_name: parentName,
+            },
+        });
+
+        if (res.data.success) {
+            activeRecipe.value = res.data.data;
+        } else {
+            recipeError.value = res.data.message || 'Data formula tidak ditemukan.';
+        }
+    } catch (err: any) {
+        recipeError.value = err.response?.data?.message || err.message || 'Gagal memuat formula komposisi bahan baku.';
+    } finally {
+        recipeLoading.value = false;
     }
 }
 
@@ -303,14 +378,15 @@ function validate(): boolean {
         e.qty_reject = 'Qty reject wajib diisi.';
     } else {
         const n = Number(form.value.qty_reject);
-        if (!Number.isFinite(n) || !Number.isInteger(n))
-            e.qty_reject = 'Qty reject harus berupa angka bulat.';
-        else if (n <= 0) e.qty_reject = 'Qty reject harus lebih besar dari 0.';
-        else if (selected.value && n > selected.value.sisa_qty)
+        if (!Number.isFinite(n) || n <= 0) {
+            e.qty_reject = 'Qty reject harus lebih besar dari 0.';
+        } else if (selected.value && n > selected.value.sisa_qty) {
             e.qty_reject = `Qty reject tidak boleh melebihi qty produk yang tersedia. Sisa: ${selected.value.sisa_qty}`;
+        }
     }
-    if (!form.value.jenis_reject)
+    if (!form.value.jenis_reject) {
         e.jenis_reject = 'Jenis reject wajib dipilih.';
+    }
     errors.value = e;
     return Object.keys(e).length === 0;
 }
@@ -341,10 +417,7 @@ function confirmSubmit() {
                 showModal.value = false;
                 router.get(
                     route('reject.index'),
-                    {
-                        search: search.value,
-                        page: props.productions.current_page,
-                    },
+                    getFilterParams(props.productions.current_page),
                     { preserveState: false, replace: true },
                 );
             },
@@ -363,10 +436,11 @@ function confirmSubmit() {
     );
 }
 
-function getFilterParams(pageOverride = 1) {
+function getFilterParams(pageOverride = 1, rejectPageOverride?: number) {
     const p: Record<string, any> = {
         page: pageOverride,
     };
+    if (rejectPageOverride) p.reject_page = rejectPageOverride;
     if (search.value && search.value.trim()) p.search = search.value.trim();
     if (currentFilter.value && currentFilter.value !== 'all') p.filter = currentFilter.value;
     if (selectedMonth.value) p.month = selectedMonth.value;
@@ -413,13 +487,20 @@ function resetFilters() {
     });
 }
 
-function setFilter(newFilter: 'all' | 'has_reject' | 'odoo') {
+function setFilter(newFilter: any) {
     currentFilter.value = newFilter;
     applyFilters();
 }
 
 function goToPage(pageNum: number) {
     router.get(route('reject.index'), getFilterParams(pageNum), {
+        preserveState: true,
+        preserveScroll: true,
+    });
+}
+
+function goToRejectPage(pageNum: number) {
+    router.get(route('reject.index'), getFilterParams(props.productions.current_page, pageNum), {
         preserveState: true,
         preserveScroll: true,
     });
@@ -443,16 +524,16 @@ const hasActiveFilters = computed(() => {
 
 const jenisLabel = computed(() => {
     const v = form.value.jenis_reject;
-    if (v === 'sublayer') return 'Reject Sublayer';
-    if (v === 'ga') return 'Reject GA';
+    if (v === 'sublayer') return 'Reject Sublayer / Supplier';
+    if (v === 'ga') return 'Reject GA / QA';
     if (v === 'process')
-        return `Proses (${selected.value ? (prosesLabel[selected.value.proses] ?? selected.value.proses) : '-'})`;
+        return `Reject Proses (${selected.value ? (prosesLabel[selected.value.proses] ?? selected.value.proses) : '-'})`;
     return '-';
 });
 </script>
 
 <template>
-    <Head title="Reject Produk" />
+    <Head title="Reject & Scrap Produksi" />
     <AuthenticatedLayout>
         <template #header>
             <div
@@ -462,11 +543,10 @@ const jenisLabel = computed(() => {
                     <h2
                         class="text-lg font-bold leading-tight text-gray-800 dark:text-gray-200 sm:text-xl"
                     >
-                        Reject Produk
+                        Reject & Scrap Produksi
                     </h2>
                     <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                        Pencatatan reject produksi per nomor batch &
-                        sinkronisasi Scrap Order ke Odoo ERP
+                        Rincian komponen material reject per batch & produk dari MO Odoo (Hanya MO Status DONE)
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
@@ -478,22 +558,96 @@ const jenisLabel = computed(() => {
                     <span class="text-xs text-gray-500 dark:text-gray-400">{{
                         isManager
                             ? 'Manager · read-only'
-                            : 'Role Leader · sumber Laporan Harian'
+                            : 'Role Leader · Data MO Odoo Terverifikasi'
                     }}</span>
                 </div>
             </div>
         </template>
 
-        <div class="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
-            <!-- flash -->
+        <div class="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8 py-2">
+            <!-- Flash Message -->
             <div
                 v-if="flashSuccess"
-                class="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-200"
+                class="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-200 flex items-center gap-2"
             >
-                {{ flashSuccess }}
+                <svg class="h-5 w-5 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                <span>{{ flashSuccess }}</span>
             </div>
 
-            <!-- Tab Switcher (Responsive Scrollable Tabs) -->
+            <!-- KPI Summary Cards -->
+            <div class="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div class="rounded-xl border border-red-200 bg-white p-3.5 shadow-sm dark:border-red-900/40 dark:bg-gray-800">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[11px] font-semibold uppercase text-red-600 dark:text-red-400">Total Reject</span>
+                        <span class="flex h-6 w-6 items-center justify-center rounded-md bg-red-100 text-red-600 dark:bg-red-900/50">
+                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="mt-2 text-xl font-bold font-mono text-gray-900 dark:text-gray-100">
+                        {{ (stats?.total_reject_pcs || 0).toLocaleString('id-ID') }}
+                    </div>
+                    <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        {{ stats?.total_records || 0 }} item transaksi terdata
+                    </p>
+                </div>
+
+                <div class="rounded-xl border border-amber-200 bg-white p-3.5 shadow-sm dark:border-amber-900/40 dark:bg-gray-800">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[11px] font-semibold uppercase text-amber-600 dark:text-amber-400">Reject QA / GA</span>
+                        <span class="flex h-6 w-6 items-center justify-center rounded-md bg-amber-100 text-amber-600 dark:bg-amber-900/50">
+                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="mt-2 text-xl font-bold font-mono text-gray-900 dark:text-gray-100">
+                        {{ (stats?.total_reject_ga || 0).toLocaleString('id-ID') }}
+                    </div>
+                    <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        Reject hasil sampling QA
+                    </p>
+                </div>
+
+                <div class="rounded-xl border border-blue-200 bg-white p-3.5 shadow-sm dark:border-blue-900/40 dark:bg-gray-800">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[11px] font-semibold uppercase text-blue-600 dark:text-blue-400">Reject Supplier</span>
+                        <span class="flex h-6 w-6 items-center justify-center rounded-md bg-blue-100 text-blue-600 dark:bg-blue-900/50">
+                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="mt-2 text-xl font-bold font-mono text-gray-900 dark:text-gray-100">
+                        {{ (stats?.total_reject_sup || 0).toLocaleString('id-ID') }}
+                    </div>
+                    <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        Defect kemasan & bahan vendor
+                    </p>
+                </div>
+
+                <div class="rounded-xl border border-purple-200 bg-white p-3.5 shadow-sm dark:border-purple-900/40 dark:bg-gray-800">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[11px] font-semibold uppercase text-purple-600 dark:text-purple-400">Loss / Reject Proses</span>
+                        <span class="flex h-6 w-6 items-center justify-center rounded-md bg-purple-100 text-purple-600 dark:bg-purple-900/50">
+                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="mt-2 text-xl font-bold font-mono text-gray-900 dark:text-gray-100">
+                        {{ (stats?.total_reject_loss || 0).toLocaleString('id-ID') }}
+                    </div>
+                    <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        Susut saat mixing/filling/packing
+                    </p>
+                </div>
+            </div>
+
+            <!-- Tab Switcher (Responsive) -->
             <div
                 class="scrollbar-none mb-5 flex overflow-x-auto border-b border-gray-200 dark:border-gray-700"
             >
@@ -520,7 +674,39 @@ const jenisLabel = computed(() => {
                             d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
                         />
                     </svg>
-                    <span>Input & Data Reject Produksi</span>
+                    <span>Rekap per Batch Produksi</span>
+                </button>
+
+                <button
+                    type="button"
+                    @click="activeTab = 'breakdown'"
+                    class="flex flex-shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-4 py-3 text-xs font-semibold transition sm:text-sm"
+                    :class="
+                        activeTab === 'breakdown'
+                            ? 'border-red-600 text-red-600 dark:border-red-400 dark:text-red-400'
+                            : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                    "
+                >
+                    <svg
+                        class="h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M4 6h16M4 10h16M4 14h16M4 18h16"
+                        />
+                    </svg>
+                    <span>Rincian per Komponen / Material</span>
+                    <span
+                        v-if="rejectDetails?.total"
+                        class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                    >
+                        {{ rejectDetails.total }}
+                    </span>
                 </button>
 
                 <button
@@ -546,7 +732,7 @@ const jenisLabel = computed(() => {
                             d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
                         />
                     </svg>
-                    <span>Scrap Order Odoo ERP (Live)</span>
+                    <span>Scrap Order Odoo (Live)</span>
                     <span
                         v-if="odooScraps.length > 0"
                         class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700 dark:bg-red-900/40 dark:text-red-300"
@@ -556,402 +742,295 @@ const jenisLabel = computed(() => {
                 </button>
             </div>
 
-            <!-- ========================================== -->
-            <!-- TAB 1: DATA REJECT PRODUKSI (LOKAL)        -->
-            <!-- ========================================== -->
-            <div v-show="activeTab === 'local'">
-                <div
-                    class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-                >
-                    <div
-                        class="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center"
+            <!-- Global Action & Filter Toolbar -->
+            <div
+                v-show="activeTab !== 'odoo'"
+                class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+                <div class="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                    <SearchInput
+                        v-model="search"
+                        placeholder="Cari produk, material reject, no batch, no MO..."
+                        class="w-full max-w-md"
+                        @search="doSearch"
+                    />
+                    <button
+                        v-if="!isManager"
+                        type="button"
+                        :disabled="syncingRejects"
+                        @click="syncMoRejects"
+                        class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-red-200 bg-white px-3.5 py-2 text-xs font-semibold text-red-600 shadow-sm transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-red-400 dark:hover:bg-gray-700"
                     >
-                        <SearchInput
-                            v-model="search"
-                            placeholder="Cari produk, no batch, proses..."
-                            class="w-full max-w-md"
-                            @search="doSearch"
-                        />
-                        <button
-                            v-if="!isManager"
-                            type="button"
-                            :disabled="syncingRejects"
-                            @click="syncMoRejects"
-                            class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-red-200 bg-white px-3.5 py-2 text-xs font-semibold text-red-600 shadow-sm transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-red-400 dark:hover:bg-gray-700"
+                        <svg
+                            class="h-4 w-4 text-red-600 dark:text-red-400"
+                            :class="{ 'animate-spin': syncingRejects }"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
                         >
-                            <svg
-                                class="h-4 w-4 text-red-600 dark:text-red-400"
-                                :class="{ 'animate-spin': syncingRejects }"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                                />
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                        </svg>
+                        <span>{{
+                            syncingRejects
+                                ? 'Sinkronisasi Reject...'
+                                : 'Sync Reject dari MO Odoo (DONE)'
+                        }}</span>
+                    </button>
+                </div>
+                <p class="text-[11px] text-gray-500 dark:text-gray-400 sm:text-xs">
+                    💡 <em>Hanya Manufacturing Order berstatus <strong>DONE</strong> yang disinkronkan.</em>
+                </p>
+            </div>
+
+            <!-- Filter & Sorting Box -->
+            <div
+                v-show="activeTab !== 'odoo'"
+                class="mb-4 rounded-xl border border-gray-200 bg-white p-3.5 sm:p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+            >
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 pb-3 dark:border-gray-700">
+                    <div class="flex items-center gap-2">
+                        <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400">
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                             </svg>
-                            <span>{{
-                                syncingRejects
-                                    ? 'Sinkronisasi Reject...'
-                                    : 'Sync Reject dari MO Odoo'
-                            }}</span>
+                        </span>
+                        <div>
+                            <h3 class="text-xs font-bold uppercase tracking-wider text-gray-800 dark:text-gray-200">
+                                Filter & Sort Data Reject
+                            </h3>
+                            <p class="text-[11px] text-gray-500 dark:text-gray-400">
+                                Saring per bulan, rentang tanggal, produk jadi, dan jenis reject
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <button
+                            v-if="hasActiveFilters"
+                            type="button"
+                            @click="resetFilters"
+                            class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 shadow-xs hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                        >
+                            <svg class="h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            <span>Reset Filter</span>
                         </button>
                     </div>
-                    <p
-                        class="text-[11px] text-gray-500 dark:text-gray-400 sm:text-xs"
-                    >
-                        💡
-                        <em
-                            >Klik pada batch untuk membuka riwayat detail
-                            reject.</em
-                        >
-                    </p>
                 </div>
 
-                <!-- Comprehensive Filter & Sorting Toolbar -->
-                <div class="mb-4 rounded-xl border border-gray-200 bg-white p-3.5 sm:p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 pb-3 dark:border-gray-700">
-                        <div class="flex items-center gap-2">
-                            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400">
-                                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                                </svg>
-                            </span>
-                            <div>
-                                <h3 class="text-xs font-bold uppercase tracking-wider text-gray-800 dark:text-gray-200">
-                                    Filter & Sort Data Reject
-                                </h3>
-                                <p class="text-[11px] text-gray-500 dark:text-gray-400">
-                                    Saring per bulan, rentang tanggal, produk/item, serta urutkan data
-                                </p>
-                            </div>
-                        </div>
-
-                        <!-- Reset Button & Summary Badge -->
-                        <div class="flex items-center gap-2">
-                            <span v-if="stats?.total_reject_pcs !== undefined" class="inline-flex items-center gap-1 rounded-md bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 dark:bg-red-950/50 dark:text-red-300 border border-red-200 dark:border-red-800">
-                                Total Reject: <strong class="font-mono">{{ (stats.total_reject_pcs || 0).toLocaleString('id-ID') }}</strong> pcs
-                            </span>
-                            <button
-                                v-if="hasActiveFilters"
-                                type="button"
-                                @click="resetFilters"
-                                class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 shadow-xs hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-                            >
-                                <svg class="h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                                <span>Reset Filter</span>
-                            </button>
-                        </div>
+                <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">📅 Filter per Bulan</label>
+                        <input
+                            type="month"
+                            v-model="selectedMonth"
+                            @change="onMonthChange"
+                            class="w-full rounded-lg border-gray-300 text-xs shadow-xs focus:border-red-500 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
+                        />
                     </div>
 
-                    <!-- Filter Form Grid -->
-                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                        <!-- 1. Filter per Bulan -->
-                        <div>
-                            <label class="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
-                                📅 Filter per Bulan
-                            </label>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">🗓️ Rentang Tanggal</label>
+                        <div class="flex items-center gap-1">
                             <input
-                                type="month"
-                                v-model="selectedMonth"
-                                @change="onMonthChange"
-                                class="w-full rounded-lg border-gray-300 text-xs shadow-xs focus:border-red-500 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
+                                type="date"
+                                v-model="selectedStartDate"
+                                @change="onDateRangeChange"
+                                placeholder="Mulai"
+                                class="w-1/2 rounded-lg border-gray-300 text-[11px] p-1.5 shadow-xs focus:border-red-500 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
+                            />
+                            <span class="text-xs text-gray-400">-</span>
+                            <input
+                                type="date"
+                                v-model="selectedEndDate"
+                                @change="onDateRangeChange"
+                                placeholder="Selesai"
+                                class="w-1/2 rounded-lg border-gray-300 text-[11px] p-1.5 shadow-xs focus:border-red-500 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
                             />
                         </div>
+                    </div>
 
-                        <!-- 2. Filter Rentang Tanggal -->
-                        <div>
-                            <label class="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
-                                🗓️ Rentang Tanggal
-                            </label>
-                            <div class="flex items-center gap-1">
-                                <input
-                                    type="date"
-                                    v-model="selectedStartDate"
-                                    @change="onDateRangeChange"
-                                    placeholder="Mulai"
-                                    class="w-1/2 rounded-lg border-gray-300 text-[11px] p-1.5 shadow-xs focus:border-red-500 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
-                                />
-                                <span class="text-xs text-gray-400">-</span>
-                                <input
-                                    type="date"
-                                    v-model="selectedEndDate"
-                                    @change="onDateRangeChange"
-                                    placeholder="Selesai"
-                                    class="w-1/2 rounded-lg border-gray-300 text-[11px] p-1.5 shadow-xs focus:border-red-500 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
-                                />
-                            </div>
-                        </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">📦 Filter Sesuai Item / Produk Jadi</label>
+                        <select
+                            v-model="selectedProdukId"
+                            @change="applyFilters"
+                            class="w-full rounded-lg border-gray-300 text-xs shadow-xs focus:border-red-500 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
+                        >
+                            <option value="">Semua Produk / Item</option>
+                            <option v-for="p in produks" :key="p.id" :value="p.id">
+                                {{ p.kode_produk ? p.kode_produk + ' - ' : '' }}{{ p.nama_produk }}
+                            </option>
+                        </select>
+                    </div>
 
-                        <!-- 3. Filter Sesuai Item / Produk -->
-                        <div>
-                            <label class="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
-                                📦 Filter Sesuai Item / Produk
-                            </label>
-                            <select
-                                v-model="selectedProdukId"
-                                @change="applyFilters"
-                                class="w-full rounded-lg border-gray-300 text-xs shadow-xs focus:border-red-500 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
-                            >
-                                <option value="">Semua Produk / Item</option>
-                                <option v-for="p in produks" :key="p.id" :value="p.id">
-                                    {{ p.kode_produk ? p.kode_produk + ' - ' : '' }}{{ p.nama_produk }}
-                                </option>
-                            </select>
-                        </div>
-
-                        <!-- 4. Sorting -->
-                        <div>
-                            <label class="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
-                                ↕️ Urutkan Data (Sort)
-                            </label>
-                            <select
-                                v-model="selectedSortBy"
-                                @change="applyFilters"
-                                class="w-full rounded-lg border-gray-300 text-xs shadow-xs focus:border-red-500 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
-                            >
-                                <option value="tanggal_desc">📅 Tanggal Terbaru</option>
-                                <option value="tanggal_asc">📅 Tanggal Terlama</option>
-                                <option value="reject_desc">🔻 Reject Terbanyak</option>
-                                <option value="reject_asc">🔺 Reject Tersedikit</option>
-                                <option value="batch_asc">🏷️ No. Batch (A - Z)</option>
-                                <option value="batch_desc">🏷️ No. Batch (Z - A)</option>
-                                <option value="produk_asc">📦 Nama Produk (A - Z)</option>
-                            </select>
-                        </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">↕️ Urutkan Data (Sort)</label>
+                        <select
+                            v-model="selectedSortBy"
+                            @change="applyFilters"
+                            class="w-full rounded-lg border-gray-300 text-xs shadow-xs focus:border-red-500 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
+                        >
+                            <option value="tanggal_desc">📅 Tanggal Terbaru</option>
+                            <option value="tanggal_asc">📅 Tanggal Terlama</option>
+                            <option value="reject_desc">🔻 Reject Terbanyak</option>
+                            <option value="reject_asc">🔺 Reject Tersedikit</option>
+                            <option value="batch_asc">🏷️ No. Batch (A - Z)</option>
+                            <option value="batch_desc">🏷️ No. Batch (Z - A)</option>
+                            <option value="produk_asc">📦 Nama Produk (A - Z)</option>
+                        </select>
                     </div>
                 </div>
 
-                <!-- Quick Filter Pills -->
-                <div class="mb-4 flex flex-wrap items-center gap-2">
+                <!-- Quick Filter Badges -->
+                <div class="mt-3.5 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
                     <button
                         type="button"
                         @click="setFilter('all')"
-                        class="rounded-lg px-3 py-1.5 text-xs font-semibold shadow-sm transition"
-                        :class="
-                            currentFilter === 'all'
-                                ? 'bg-red-600 text-white dark:bg-red-500'
-                                : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-700'
-                        "
+                        class="rounded-lg px-2.5 py-1 text-xs font-semibold shadow-xs transition"
+                        :class="currentFilter === 'all' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'"
                     >
-                        Semua Batch
+                        Semua Data
                     </button>
                     <button
                         type="button"
-                        @click="setFilter('has_reject')"
-                        class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold shadow-sm transition"
-                        :class="
-                            currentFilter === 'has_reject'
-                                ? 'bg-red-600 text-white dark:bg-red-500'
-                                : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-700'
-                        "
+                        @click="setFilter('ga')"
+                        class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold shadow-xs transition"
+                        :class="currentFilter === 'ga' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800'"
                     >
-                        <span class="inline-block h-2 w-2 rounded-full bg-amber-500"></span>
-                        Memiliki Reject
+                        <span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+                        Reject QA / GA
+                    </button>
+                    <button
+                        type="button"
+                        @click="setFilter('sublayer')"
+                        class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold shadow-xs transition"
+                        :class="currentFilter === 'sublayer' ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800'"
+                    >
+                        <span class="inline-block h-1.5 w-1.5 rounded-full bg-blue-500"></span>
+                        Reject Supplier
+                    </button>
+                    <button
+                        type="button"
+                        @click="setFilter('process')"
+                        class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold shadow-xs transition"
+                        :class="currentFilter === 'process' ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-800 border border-purple-200 hover:bg-purple-100 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800'"
+                    >
+                        <span class="inline-block h-1.5 w-1.5 rounded-full bg-purple-500"></span>
+                        Loss / Reject Proses
                     </button>
                     <button
                         type="button"
                         @click="setFilter('odoo')"
-                        class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold shadow-sm transition"
-                        :class="
-                            currentFilter === 'odoo'
-                                ? 'bg-red-600 text-white dark:bg-red-500'
-                                : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-700'
-                        "
+                        class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold shadow-xs transition"
+                        :class="currentFilter === 'odoo' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'"
                     >
-                        <span class="inline-block h-2 w-2 rounded-full bg-emerald-500"></span>
-                        Tersinkron Odoo MO
+                        <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                        Tersinkron MO Odoo
                     </button>
                 </div>
+            </div>
 
+            <!-- ========================================== -->
+            <!-- TAB 1: REKAP PER BATCH PRODUKSI            -->
+            <!-- ========================================== -->
+            <div v-show="activeTab === 'local'">
                 <!-- DESKTOP TABLE VIEW (md and up) -->
-                <div
-                    class="hidden overflow-hidden bg-white shadow-sm dark:bg-gray-800 sm:rounded-lg md:block"
-                >
+                <div class="hidden overflow-hidden bg-white shadow-sm dark:bg-gray-800 sm:rounded-lg md:block border border-gray-200 dark:border-gray-700">
                     <div class="overflow-x-auto">
-                        <table
-                            class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm"
-                        >
+                        <table class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm">
                             <thead class="bg-gray-50 dark:bg-gray-700/70">
                                 <tr>
-                                    <th
-                                        class="w-8 px-2 py-2.5 text-center text-xs font-semibold uppercase text-gray-400"
-                                    ></th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
+                                    <th class="w-8 px-2 py-2.5 text-center text-xs font-semibold uppercase text-gray-400"></th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
                                         No. Batch
                                     </th>
-                                    <th
-                                        class="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
-                                        Nama Produk
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
+                                        Produk Jadi
                                     </th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
                                         Process
                                     </th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
                                         Tanggal
                                     </th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
                                         Qty Tersedia
                                     </th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
                                         Total Reject
                                     </th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
                                         Sisa
                                     </th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
                                         Aksi
                                     </th>
                                 </tr>
                             </thead>
-                            <tbody
-                                class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800"
-                            >
+                            <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                                 <tr v-if="productions.data.length === 0">
-                                    <td
-                                        colspan="9"
-                                        class="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400"
-                                    >
+                                    <td colspan="9" class="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                                         Tidak ada data produksi
                                     </td>
                                 </tr>
-                                <template
-                                    v-for="item in productions.data"
-                                    :key="item.id"
-                                >
+                                <template v-for="item in productions.data" :key="item.id">
                                     <tr
                                         @click="toggleBatchExpand(item.id)"
                                         class="cursor-pointer transition hover:bg-red-50/40 dark:hover:bg-gray-700/60"
-                                        :class="{
-                                            'bg-red-50/20 dark:bg-gray-700/30':
-                                                expandedBatches[item.id],
-                                        }"
+                                        :class="{ 'bg-red-50/20 dark:bg-gray-700/30': expandedBatches[item.id] }"
                                     >
-                                        <td
-                                            class="px-2 py-2.5 text-center text-gray-400"
-                                        >
+                                        <td class="px-2 py-2.5 text-center text-gray-400">
                                             <svg
                                                 class="h-4 w-4 text-gray-400 transition-transform duration-200"
-                                                :class="{
-                                                    'rotate-90 text-red-600':
-                                                        expandedBatches[
-                                                            item.id
-                                                        ],
-                                                }"
+                                                :class="{ 'rotate-90 text-red-600': expandedBatches[item.id] }"
                                                 fill="none"
                                                 viewBox="0 0 24 24"
                                                 stroke="currentColor"
                                             >
-                                                <path
-                                                    stroke-linecap="round"
-                                                    stroke-linejoin="round"
-                                                    stroke-width="2"
-                                                    d="M9 5l7 7-7 7"
-                                                />
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                                             </svg>
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 font-mono font-bold text-gray-900 dark:text-gray-100"
-                                        >
-                                            <span
-                                                class="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-900 dark:bg-gray-700 dark:text-gray-100"
-                                            >
+                                        <td class="whitespace-nowrap px-3 py-2.5 font-mono font-bold text-gray-900 dark:text-gray-100">
+                                            <span class="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-900 dark:bg-gray-700 dark:text-gray-100">
                                                 {{ item.batch_number }}
                                             </span>
                                         </td>
-                                        <td
-                                            class="px-3 py-2.5 font-medium text-gray-900 dark:text-gray-100"
-                                        >
-                                            {{
-                                                item.produk?.nama_produk ?? '-'
-                                            }}
+                                        <td class="px-3 py-2.5 font-medium text-gray-900 dark:text-gray-100">
+                                            {{ item.produk?.nama_produk ?? '-' }}
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 text-gray-700 dark:text-gray-200"
-                                        >
-                                            {{
-                                                prosesLabel[item.proses] ??
-                                                item.proses
-                                            }}
+                                        <td class="whitespace-nowrap px-3 py-2.5 text-gray-700 dark:text-gray-200">
+                                            <span class="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium capitalize text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                                                {{ prosesLabel[item.proses] ?? item.proses }}
+                                            </span>
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 text-gray-600 dark:text-gray-300"
-                                        >
+                                        <td class="whitespace-nowrap px-3 py-2.5 text-gray-600 dark:text-gray-300">
                                             {{ formatDate(item.tanggal) }}
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 text-right font-medium text-gray-900 dark:text-gray-100"
-                                        >
-                                            {{
-                                                item.available_qty.toLocaleString(
-                                                    'id-ID',
-                                                )
-                                            }}
+                                        <td class="whitespace-nowrap px-3 py-2.5 text-right font-medium text-gray-900 dark:text-gray-100">
+                                            {{ item.available_qty.toLocaleString('id-ID') }}
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 text-right font-semibold"
-                                            :class="
-                                                item.total_reject > 0
-                                                    ? 'text-amber-600 dark:text-amber-400'
-                                                    : 'text-gray-400'
-                                            "
-                                        >
-                                            {{
-                                                item.total_reject.toLocaleString(
-                                                    'id-ID',
-                                                )
-                                            }}
+                                        <td class="whitespace-nowrap px-3 py-2.5 text-right font-bold" :class="item.total_reject > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'">
+                                            {{ item.total_reject.toLocaleString('id-ID') }}
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 text-right font-semibold"
-                                            :class="
-                                                item.sisa_qty === 0
-                                                    ? 'text-red-600'
-                                                    : 'text-green-600'
-                                            "
-                                        >
-                                            {{
-                                                item.sisa_qty.toLocaleString(
-                                                    'id-ID',
-                                                )
-                                            }}
+                                        <td class="whitespace-nowrap px-3 py-2.5 text-right font-semibold" :class="item.sisa_qty === 0 ? 'text-red-600' : 'text-green-600'">
+                                            {{ item.sisa_qty.toLocaleString('id-ID') }}
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 text-right"
-                                            @click.stop
-                                        >
-                                            <span
-                                                v-if="isManager"
-                                                class="text-xs text-gray-400"
-                                                >Read-only</span
-                                            >
+                                        <td class="whitespace-nowrap px-3 py-2.5 text-right" @click.stop>
+                                            <span v-if="isManager" class="text-xs text-gray-400">Read-only</span>
                                             <button
                                                 v-else
                                                 :disabled="item.sisa_qty === 0"
                                                 @click="openReject(item)"
-                                                class="inline-flex items-center rounded-md px-2.5 py-1 text-xs font-semibold shadow-sm transition"
+                                                class="inline-flex items-center rounded-md px-2.5 py-1 text-xs font-semibold shadow-xs transition"
                                                 :class="
                                                     item.sisa_qty === 0
                                                         ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-700'
-                                                        : 'bg-red-600 text-white hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:bg-red-500 dark:hover:bg-red-600'
+                                                        : 'bg-red-600 text-white hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-red-500 dark:hover:bg-red-600'
                                                 "
                                             >
                                                 + Reject
@@ -959,248 +1038,94 @@ const jenisLabel = computed(() => {
                                         </td>
                                     </tr>
 
-                                    <!-- DROPDOWN ACCORDION DETAIL BARIS PRODUKSI -->
-                                    <tr
-                                        v-if="expandedBatches[item.id]"
-                                        class="bg-gray-50/90 dark:bg-gray-900/60"
-                                    >
+                                    <!-- ACCORDION DETAIL RINCIAN MATERIAL REJECT -->
+                                    <tr v-if="expandedBatches[item.id]" class="bg-gray-50/90 dark:bg-gray-900/60">
                                         <td colspan="9" class="p-3 sm:p-4">
-                                            <div
-                                                class="rounded-xl border border-red-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
-                                            >
-                                                <div
-                                                    class="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3 dark:border-gray-700"
-                                                >
-                                                    <div
-                                                        class="flex items-center gap-2"
-                                                    >
-                                                        <span
-                                                            class="text-sm font-bold text-gray-900 dark:text-gray-100"
-                                                        >
-                                                            Detail Item Reject
-                                                            Batch:
-                                                            <span
-                                                                class="font-mono text-red-600 dark:text-red-400"
-                                                                >{{
-                                                                    item.batch_number
-                                                                }}</span
-                                                            >
+                                            <div class="rounded-xl border border-red-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                                                <div class="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3 dark:border-gray-700">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-sm font-bold text-gray-900 dark:text-gray-100">
+                                                            Rincian Komponen Material Reject Batch:
+                                                            <span class="font-mono text-red-600 dark:text-red-400">{{ item.batch_number }}</span>
                                                         </span>
-                                                        <span
-                                                            class="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                                                        >
-                                                            Total Reject:
-                                                            {{
-                                                                item.total_reject
-                                                            }}
-                                                            pcs
+                                                        <span class="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                                                            Total: {{ item.total_reject }} pcs
                                                         </span>
                                                     </div>
-                                                    <div
-                                                        class="text-xs text-gray-500 dark:text-gray-400"
-                                                    >
-                                                        Produk:
-                                                        <strong>{{
-                                                            item.produk
-                                                                ?.nama_produk
-                                                        }}</strong>
-                                                        | Sisa:
-                                                        <strong
-                                                            :class="
-                                                                item.sisa_qty ===
-                                                                0
-                                                                    ? 'text-red-600'
-                                                                    : 'text-green-600'
-                                                            "
-                                                            >{{
-                                                                item.sisa_qty
-                                                            }}
-                                                            pcs</strong
-                                                        >
+                                                    <div class="text-xs text-gray-500 dark:text-gray-400">
+                                                        Produk Jadi: <strong>{{ item.produk?.nama_produk }}</strong> | Sisa: <strong :class="item.sisa_qty === 0 ? 'text-red-600' : 'text-green-600'">{{ item.sisa_qty }} pcs</strong>
                                                     </div>
                                                 </div>
 
-                                                <div
-                                                    v-if="
-                                                        !item.reject_details ||
-                                                        item.reject_details
-                                                            .length === 0
-                                                    "
-                                                    class="py-5 text-center text-xs text-gray-500 dark:text-gray-400"
-                                                >
-                                                    Belum ada item reject yang
-                                                    diinput pada batch ini.
-                                                    Tekan tombol
-                                                    <strong>+ Reject</strong> di
-                                                    atas untuk menambah data
-                                                    reject.
+                                                <div v-if="!item.reject_details || item.reject_details.length === 0" class="py-5 text-center text-xs text-gray-500 dark:text-gray-400">
+                                                    Belum ada item reject yang diinput pada batch ini. Tekan tombol <strong>+ Reject</strong> di atas untuk menambah data reject.
                                                 </div>
 
-                                                <div
-                                                    v-else
-                                                    class="overflow-x-auto"
-                                                >
-                                                    <table
-                                                        class="min-w-full divide-y divide-gray-200 text-xs dark:divide-gray-700"
-                                                    >
-                                                        <thead
-                                                            class="bg-gray-50 dark:bg-gray-700"
-                                                        >
+                                                <div v-else class="overflow-x-auto">
+                                                    <table class="min-w-full divide-y divide-gray-200 text-xs dark:divide-gray-700">
+                                                        <thead class="bg-gray-50 dark:bg-gray-700/80">
                                                             <tr>
-                                                                <th
-                                                                    class="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-300"
-                                                                >
-                                                                    Waktu Input
-                                                                </th>
-                                                                <th
-                                                                    class="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-300"
-                                                                >
-                                                                    Jenis Reject
-                                                                </th>
-                                                                <th
-                                                                    class="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-300"
-                                                                >
-                                                                    Qty Reject
-                                                                </th>
-                                                                <th
-                                                                    class="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-300"
-                                                                >
-                                                                    Alasan /
-                                                                    Keterangan
-                                                                </th>
-                                                                <th
-                                                                    class="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-300"
-                                                                >
-                                                                    Diinput Oleh
-                                                                </th>
-                                                                <th
-                                                                    class="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-300"
-                                                                >
-                                                                    Aksi
-                                                                </th>
+                                                                <th class="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300">Material / Komponen yang Di-Reject</th>
+                                                                <th class="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300">Jenis Reject</th>
+                                                                <th class="px-3 py-2 text-right font-semibold text-gray-600 dark:text-gray-300">Qty Reject</th>
+                                                                <th class="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300">Satuan (UoM)</th>
+                                                                <th class="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300">No. MO / Dokumen Odoo</th>
+                                                                <th class="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300">Waktu Input & Dicatat Oleh</th>
+                                                                <th class="px-3 py-2 text-right font-semibold text-gray-600 dark:text-gray-300">Aksi</th>
                                                             </tr>
                                                         </thead>
-                                                        <tbody
-                                                            class="divide-y divide-gray-100 dark:divide-gray-700/50"
-                                                        >
-                                                            <tr
-                                                                v-for="rd in item.reject_details"
-                                                                :key="rd.id"
-                                                                class="hover:bg-gray-50 dark:hover:bg-gray-700/30"
-                                                            >
-                                                                <td
-                                                                    class="whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-400"
-                                                                >
-                                                                    {{
-                                                                        new Date(
-                                                                            rd.created_at,
-                                                                        ).toLocaleString(
-                                                                            'id-ID',
-                                                                            {
-                                                                                dateStyle:
-                                                                                    'short',
-                                                                                timeStyle:
-                                                                                    'short',
-                                                                            },
-                                                                        )
-                                                                    }}
-                                                                </td>
-                                                                <td
-                                                                    class="whitespace-nowrap px-3 py-2"
-                                                                >
-                                                                    <div
-                                                                        class="flex flex-wrap items-center gap-1.5"
-                                                                    >
-                                                                        <span
-                                                                            class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                                                                            :class="
-                                                                                getJenisBadge(
-                                                                                    rd.jenis_reject,
-                                                                                )
-                                                                                    .class
-                                                                            "
-                                                                        >
-                                                                            {{
-                                                                                getJenisBadge(
-                                                                                    rd.jenis_reject,
-                                                                                )
-                                                                                    .label
-                                                                            }}
+                                                        <tbody class="divide-y divide-gray-100 dark:divide-gray-700/50">
+                                                            <tr v-for="rd in item.reject_details" :key="rd.id" class="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                                                                <td class="px-3 py-2">
+                                                                    <div class="flex items-center gap-1.5 font-medium text-gray-900 dark:text-gray-100 flex-wrap">
+                                                                        <span class="flex h-5 w-5 items-center justify-center rounded bg-gray-100 text-xs dark:bg-gray-700">
+                                                                            {{ getItemCategory(rd.material_name).icon }}
                                                                         </span>
-                                                                        <span
-                                                                            v-if="
-                                                                                rd.odoo_scrap_id
-                                                                            "
-                                                                            class="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                                                                            title="Data tersinkron dari Odoo MO"
-                                                                        >
-                                                                            <svg
-                                                                                class="h-2.5 w-2.5"
-                                                                                fill="currentColor"
-                                                                                viewBox="0 0 20 20"
-                                                                            >
-                                                                                <path
-                                                                                    fill-rule="evenodd"
-                                                                                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                                                                                    clip-rule="evenodd"
-                                                                                />
-                                                                            </svg>
-                                                                            Odoo
-                                                                            MO
+                                                                        <span class="font-bold">{{ rd.material_name || rd.keterangan || '-' }}</span>
+                                                                        <span class="inline-flex items-center rounded-full px-1.5 py-0.2 text-[10px] font-semibold border" :class="getItemCategory(rd.material_name).class">
+                                                                            {{ getItemCategory(rd.material_name).label }}
                                                                         </span>
+                                                                        <button
+                                                                            v-if="getItemCategory(rd.material_name).canDecompose"
+                                                                            type="button"
+                                                                            @click.stop="openRecipeBreakdown(rd)"
+                                                                            class="inline-flex items-center gap-1 rounded bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700 hover:bg-teal-100 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800 transition active:scale-95 shadow-xs"
+                                                                            title="Lihat rincian takaran bahan baku penyusun yang terkandung di dalam produk reject ini"
+                                                                        >
+                                                                            🧪 Uraian Bahan Baku
+                                                                        </button>
                                                                     </div>
                                                                 </td>
-                                                                <td
-                                                                    class="whitespace-nowrap px-3 py-2 text-right font-bold text-red-600 dark:text-red-400"
-                                                                >
-                                                                    {{
-                                                                        rd.jumlah.toLocaleString(
-                                                                            'id-ID',
-                                                                        )
-                                                                    }}
+                                                                <td class="whitespace-nowrap px-3 py-2">
+                                                                    <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" :class="getJenisBadge(rd.jenis_reject).class">
+                                                                        {{ getJenisBadge(rd.jenis_reject).label }}
+                                                                    </span>
                                                                 </td>
-                                                                <td
-                                                                    class="px-3 py-2 text-gray-800 dark:text-gray-200"
-                                                                >
-                                                                    {{
-                                                                        rd.keterangan ||
-                                                                        '-'
-                                                                    }}
+                                                                <td class="whitespace-nowrap px-3 py-2 text-right font-mono font-bold text-red-600 dark:text-red-400">
+                                                                    {{ rd.jumlah.toLocaleString('id-ID') }}
                                                                 </td>
-                                                                <td
-                                                                    class="whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-400"
-                                                                >
-                                                                    {{
-                                                                        rd
-                                                                            .creator
-                                                                            ?.name ||
-                                                                        'Leader'
-                                                                    }}
+                                                                <td class="whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-300 font-medium">
+                                                                    {{ rd.material_uom || 'Pcs' }}
                                                                 </td>
-                                                                <td
-                                                                    class="whitespace-nowrap px-3 py-2 text-right"
-                                                                >
+                                                                <td class="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-700 dark:text-gray-300">
+                                                                    <span v-if="rd.odoo_mo_name" class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                                                        {{ rd.odoo_mo_name }}
+                                                                    </span>
+                                                                    <span v-else class="text-gray-400">-</span>
+                                                                </td>
+                                                                <td class="whitespace-nowrap px-3 py-2 text-gray-500 dark:text-gray-400 text-[11px]">
+                                                                    {{ new Date(rd.created_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) }} · {{ rd.creator?.name || 'System / Odoo' }}
+                                                                </td>
+                                                                <td class="whitespace-nowrap px-3 py-2 text-right">
                                                                     <button
-                                                                        v-if="
-                                                                            canDeleteReject(
-                                                                                rd,
-                                                                            )
-                                                                        "
+                                                                        v-if="canDeleteReject(rd)"
                                                                         type="button"
-                                                                        @click.stop="
-                                                                            openDeleteModal(
-                                                                                rd,
-                                                                            )
-                                                                        "
+                                                                        @click.stop="openDeleteModal(rd)"
                                                                         class="text-red-600 hover:text-red-800 hover:underline dark:text-red-400"
                                                                     >
                                                                         Hapus
                                                                     </button>
-                                                                    <span
-                                                                        v-else
-                                                                        class="text-gray-400"
-                                                                        >-</span
-                                                                    >
+                                                                    <span v-else class="text-gray-400">-</span>
                                                                 </td>
                                                             </tr>
                                                         </tbody>
@@ -1229,100 +1154,41 @@ const jenisLabel = computed(() => {
                         :key="item.id"
                         class="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm transition dark:border-gray-700 dark:bg-gray-800"
                     >
-                        <!-- Top Batch & Date Header -->
-                        <div
-                            class="flex items-start justify-between gap-2 border-b border-gray-100 pb-2.5 dark:border-gray-700"
-                        >
+                        <div class="flex items-start justify-between gap-2 border-b border-gray-100 pb-2.5 dark:border-gray-700">
                             <div>
                                 <div class="flex items-center gap-1.5">
-                                    <span
-                                        class="rounded bg-gray-100 px-2 py-0.5 font-mono text-xs font-bold text-gray-900 dark:bg-gray-700 dark:text-gray-100"
-                                    >
+                                    <span class="rounded bg-gray-100 px-2 py-0.5 font-mono text-xs font-bold text-gray-900 dark:bg-gray-700 dark:text-gray-100">
                                         {{ item.batch_number }}
                                     </span>
-                                    <span
-                                        class="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium capitalize text-slate-700 dark:bg-slate-700 dark:text-slate-200"
-                                    >
-                                        {{
-                                            prosesLabel[item.proses] ??
-                                            item.proses
-                                        }}
+                                    <span class="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium capitalize text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                                        {{ prosesLabel[item.proses] ?? item.proses }}
                                     </span>
                                 </div>
-                                <h3
-                                    class="mt-1 text-sm font-bold text-gray-900 dark:text-gray-100"
-                                >
+                                <h3 class="mt-1 text-sm font-bold text-gray-900 dark:text-gray-100">
                                     {{ item.produk?.nama_produk ?? '-' }}
                                 </h3>
                             </div>
-                            <span
-                                class="text-[11px] font-medium text-gray-500 dark:text-gray-400"
-                            >
+                            <span class="text-[11px] font-medium text-gray-500 dark:text-gray-400">
                                 {{ formatDate(item.tanggal) }}
                             </span>
                         </div>
 
-                        <!-- 3-Column Metrics Grid -->
-                        <div
-                            class="my-2.5 grid grid-cols-3 gap-2 text-center text-xs"
-                        >
-                            <div
-                                class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/40"
-                            >
-                                <span
-                                    class="block text-[10px] text-gray-500 dark:text-gray-400"
-                                    >Tersedia</span
-                                >
-                                <span
-                                    class="font-bold text-gray-900 dark:text-gray-100"
-                                    >{{
-                                        item.available_qty.toLocaleString(
-                                            'id-ID',
-                                        )
-                                    }}</span
-                                >
+                        <div class="my-2.5 grid grid-cols-3 gap-2 text-center text-xs">
+                            <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/40">
+                                <span class="block text-[10px] text-gray-500 dark:text-gray-400">Tersedia</span>
+                                <span class="font-bold text-gray-900 dark:text-gray-100">{{ item.available_qty.toLocaleString('id-ID') }}</span>
                             </div>
-                            <div
-                                class="rounded-lg bg-red-50/60 p-2 dark:bg-red-950/30"
-                            >
-                                <span
-                                    class="block text-[10px] text-red-600 dark:text-red-400"
-                                    >Reject</span
-                                >
-                                <span
-                                    class="font-bold text-red-600 dark:text-red-400"
-                                    >{{
-                                        item.total_reject.toLocaleString(
-                                            'id-ID',
-                                        )
-                                    }}</span
-                                >
+                            <div class="rounded-lg bg-red-50/60 p-2 dark:bg-red-950/30">
+                                <span class="block text-[10px] text-red-600 dark:text-red-400">Reject</span>
+                                <span class="font-bold text-red-600 dark:text-red-400">{{ item.total_reject.toLocaleString('id-ID') }}</span>
                             </div>
-                            <div
-                                class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/40"
-                            >
-                                <span
-                                    class="block text-[10px] text-gray-500 dark:text-gray-400"
-                                    >Sisa</span
-                                >
-                                <span
-                                    class="font-bold"
-                                    :class="
-                                        item.sisa_qty === 0
-                                            ? 'text-red-600'
-                                            : 'text-green-600'
-                                    "
-                                    >{{
-                                        item.sisa_qty.toLocaleString('id-ID')
-                                    }}</span
-                                >
+                            <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/40">
+                                <span class="block text-[10px] text-gray-500 dark:text-gray-400">Sisa</span>
+                                <span class="font-bold" :class="item.sisa_qty === 0 ? 'text-red-600' : 'text-green-600'">{{ item.sisa_qty.toLocaleString('id-ID') }}</span>
                             </div>
                         </div>
 
-                        <!-- Action Row -->
-                        <div
-                            class="flex items-center justify-between gap-2 border-t border-gray-100 pt-2.5 dark:border-gray-700"
-                        >
+                        <div class="flex items-center justify-between gap-2 border-t border-gray-100 pt-2.5 dark:border-gray-700">
                             <button
                                 type="button"
                                 @click="toggleBatchExpand(item.id)"
@@ -1330,33 +1196,21 @@ const jenisLabel = computed(() => {
                             >
                                 <svg
                                     class="h-3.5 w-3.5 transition-transform"
-                                    :class="{
-                                        'rotate-90 text-red-600':
-                                            expandedBatches[item.id],
-                                    }"
+                                    :class="{ 'rotate-90 text-red-600': expandedBatches[item.id] }"
                                     fill="none"
                                     viewBox="0 0 24 24"
                                     stroke="currentColor"
                                 >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        stroke-width="2"
-                                        d="M9 5l7 7-7 7"
-                                    />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                                 </svg>
-                                <span
-                                    >Detail ({{
-                                        item.reject_details?.length ?? 0
-                                    }})</span
-                                >
+                                <span>Rincian Material ({{ item.reject_details?.length ?? 0 }})</span>
                             </button>
 
                             <button
                                 v-if="!isManager"
                                 :disabled="item.sisa_qty === 0"
                                 @click="openReject(item)"
-                                class="inline-flex items-center rounded-lg px-3 py-1 text-xs font-bold shadow-sm transition"
+                                class="inline-flex items-center rounded-lg px-3 py-1 text-xs font-bold shadow-xs transition"
                                 :class="
                                     item.sisa_qty === 0
                                         ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-700'
@@ -1367,97 +1221,48 @@ const jenisLabel = computed(() => {
                             </button>
                         </div>
 
-                        <!-- Mobile Expandable Detail Cards -->
-                        <div
-                            v-if="expandedBatches[item.id]"
-                            class="mt-3 border-t border-dashed border-gray-200 pt-3 dark:border-gray-700"
-                        >
-                            <div
-                                v-if="
-                                    !item.reject_details ||
-                                    item.reject_details.length === 0
-                                "
-                                class="py-3 text-center text-xs text-gray-400"
-                            >
+                        <!-- Mobile Material Breakdown Cards -->
+                        <div v-if="expandedBatches[item.id]" class="mt-3 border-t border-dashed border-gray-200 pt-3 dark:border-gray-700">
+                            <div v-if="!item.reject_details || item.reject_details.length === 0" class="py-3 text-center text-xs text-gray-400">
                                 Belum ada item reject pada batch ini.
                             </div>
                             <div v-else class="space-y-2">
-                                <div
-                                    v-for="rd in item.reject_details"
-                                    :key="rd.id"
-                                    class="rounded-lg bg-gray-50 p-2.5 text-xs dark:bg-gray-900/50"
-                                >
-                                    <div
-                                        class="flex items-center justify-between"
-                                    >
-                                        <div
-                                            class="flex items-center gap-1.5"
-                                        >
-                                            <span
-                                                class="inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                                                :class="
-                                                    getJenisBadge(
-                                                        rd.jenis_reject,
-                                                    ).class
-                                                "
-                                            >
-                                                {{
-                                                    getJenisBadge(
-                                                        rd.jenis_reject,
-                                                    ).label
-                                                }}
-                                            </span>
-                                            <span
-                                                v-if="rd.odoo_scrap_id"
-                                                class="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                                            >
-                                                Odoo MO
-                                            </span>
+                                <div v-for="rd in item.reject_details" :key="rd.id" class="rounded-lg bg-gray-50 p-2.5 text-xs dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700">
+                                    <div class="flex items-start justify-between gap-2">
+                                        <div>
+                                            <div class="flex items-center gap-1.5 flex-wrap">
+                                                <span class="font-bold text-gray-900 dark:text-gray-100">{{ rd.material_name || rd.keterangan }}</span>
+                                                <span class="inline-flex items-center rounded-full px-1.5 py-0.2 text-[9px] font-semibold border" :class="getItemCategory(rd.material_name).class">
+                                                    {{ getItemCategory(rd.material_name).label }}
+                                                </span>
+                                            </div>
+                                            <div class="mt-1 flex items-center gap-1.5 flex-wrap">
+                                                <span class="inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="getJenisBadge(rd.jenis_reject).class">
+                                                    {{ getJenisBadge(rd.jenis_reject).label }}
+                                                </span>
+                                                <span v-if="rd.odoo_mo_name" class="font-mono text-[10px] text-amber-700 dark:text-amber-300">
+                                                    {{ rd.odoo_mo_name }}
+                                                </span>
+                                                <button
+                                                    v-if="getItemCategory(rd.material_name).canDecompose"
+                                                    type="button"
+                                                    @click.stop="openRecipeBreakdown(rd)"
+                                                    class="inline-flex items-center gap-1 rounded bg-teal-50 px-1.5 py-0.5 text-[9px] font-bold text-teal-700 hover:bg-teal-100 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800 transition"
+                                                >
+                                                    🧪 Uraian Bahan Baku
+                                                </button>
+                                            </div>
                                         </div>
-                                        <span
-                                            class="font-bold text-red-600 dark:text-red-400"
-                                            >{{
-                                                rd.jumlah.toLocaleString(
-                                                    'id-ID',
-                                                )
-                                            }}
-                                            pcs</span
-                                        >
+                                        <div class="text-right">
+                                            <span class="font-mono font-bold text-red-600 dark:text-red-400 text-sm">
+                                                {{ rd.jumlah.toLocaleString('id-ID') }}
+                                            </span>
+                                            <span class="text-[10px] text-gray-500 ml-0.5">{{ rd.material_uom || 'Pcs' }}</span>
+                                        </div>
                                     </div>
-                                    <p
-                                        class="mt-1 text-gray-800 dark:text-gray-200"
-                                    >
-                                        <span
-                                            class="text-gray-500 dark:text-gray-400"
-                                            >Alasan:</span
-                                        >
-                                        {{ rd.keterangan || '-' }}
-                                    </p>
-                                    <div
-                                        class="mt-1.5 flex items-center justify-between text-[11px] text-gray-400"
-                                    >
-                                        <span
-                                            >{{
-                                                new Date(
-                                                    rd.created_at,
-                                                ).toLocaleString('id-ID', {
-                                                    dateStyle: 'short',
-                                                    timeStyle: 'short',
-                                                })
-                                            }}
-                                            ·
-                                            {{
-                                                rd.creator?.name || 'Leader'
-                                            }}</span
-                                        >
-                                        <button
-                                            v-if="canDeleteReject(rd)"
-                                            type="button"
-                                            @click="openDeleteModal(rd)"
-                                            class="font-semibold text-red-600 hover:underline dark:text-red-400"
-                                        >
-                                            Hapus
-                                        </button>
+                                    <div class="mt-2 flex items-center justify-between text-[10px] text-gray-400 border-t border-gray-100 pt-1.5 dark:border-gray-800">
+                                        <span>{{ new Date(rd.created_at).toLocaleDateString('id-ID') }}</span>
+                                        <button v-if="canDeleteReject(rd)" @click.stop="openDeleteModal(rd)" class="text-red-600 font-semibold hover:underline">Hapus</button>
                                     </div>
                                 </div>
                             </div>
@@ -1465,10 +1270,8 @@ const jenisLabel = computed(() => {
                     </div>
                 </div>
 
-                <!-- Pagination -->
-                <div
-                    class="mt-3 border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800 sm:rounded-lg"
-                >
+                <!-- Pagination for Batch View -->
+                <div class="mt-3 border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800 sm:rounded-lg">
                     <Pagination
                         :current-page="productions.current_page"
                         :last-page="productions.last_page"
@@ -1479,17 +1282,206 @@ const jenisLabel = computed(() => {
                 </div>
             </div>
 
+            <!-- ============================================================== -->
+            <!-- TAB 2: RINCIAN LENGKAP SEMUA MATERIAL REJECT (ITEMIZED VIEW)   -->
+            <!-- ============================================================== -->
+            <div v-show="activeTab === 'breakdown'">
+                <!-- DESKTOP TABLE VIEW BREAKDOWN -->
+                <div class="hidden overflow-hidden bg-white shadow-sm dark:bg-gray-800 sm:rounded-lg md:block border border-gray-200 dark:border-gray-700">
+                    <div class="overflow-x-auto">
+                        <table class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm">
+                            <thead class="bg-gray-50 dark:bg-gray-700/70">
+                                <tr>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
+                                        Produk Jadi & Batch
+                                    </th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
+                                        Material / Komponen yang Di-Reject
+                                    </th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
+                                        Jenis Reject
+                                    </th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
+                                        Qty Reject
+                                    </th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
+                                        Satuan (UoM)
+                                    </th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
+                                        No. MO / Dokumen Odoo
+                                    </th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
+                                        Waktu & Sumber
+                                    </th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
+                                        Aksi
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                                <tr v-if="!rejectDetails?.data || rejectDetails.data.length === 0">
+                                    <td colspan="8" class="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                                        Tidak ada data komponen reject yang sesuai filter.
+                                    </td>
+                                </tr>
+                                <tr
+                                    v-for="rd in rejectDetails?.data"
+                                    :key="rd.id"
+                                    class="hover:bg-red-50/30 dark:hover:bg-gray-700/50 transition"
+                                >
+                                    <td class="whitespace-nowrap px-3 py-2.5">
+                                        <div class="font-semibold text-gray-900 dark:text-gray-100">
+                                            {{ rd.laporan_harian?.produk?.nama_produk || 'Produk' }}
+                                        </div>
+                                        <div class="mt-0.5 flex items-center gap-1.5">
+                                            <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-800 dark:bg-gray-700 dark:text-gray-200">
+                                                {{ rd.laporan_harian?.batch_number || '-' }}
+                                            </span>
+                                            <span class="text-[10px] text-gray-400 capitalize">
+                                                {{ rd.laporan_harian?.proses || '' }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td class="px-3 py-2.5">
+                                        <div class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5 flex-wrap">
+                                            <span>{{ getItemCategory(rd.material_name).icon }}</span>
+                                            <span>{{ rd.material_name || rd.keterangan || '-' }}</span>
+                                            <span class="inline-flex items-center rounded-full px-1.5 py-0.2 text-[10px] font-semibold border" :class="getItemCategory(rd.material_name).class">
+                                                {{ getItemCategory(rd.material_name).label }}
+                                            </span>
+                                            <button
+                                                v-if="getItemCategory(rd.material_name).canDecompose"
+                                                type="button"
+                                                @click.stop="openRecipeBreakdown(rd)"
+                                                class="inline-flex items-center gap-1 rounded bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700 hover:bg-teal-100 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800 transition active:scale-95 shadow-xs"
+                                                title="Lihat rincian takaran bahan baku penyusun yang terkandung di dalam produk reject ini"
+                                            >
+                                                🧪 Uraian Bahan Baku
+                                            </button>
+                                        </div>
+                                        <p v-if="rd.keterangan && rd.material_name && rd.keterangan !== rd.material_name" class="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                                            {{ rd.keterangan }}
+                                        </p>
+                                    </td>
+                                    <td class="whitespace-nowrap px-3 py-2.5">
+                                        <span class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold" :class="getJenisBadge(rd.jenis_reject).class">
+                                            {{ getJenisBadge(rd.jenis_reject).label }}
+                                        </span>
+                                    </td>
+                                    <td class="whitespace-nowrap px-3 py-2.5 text-right font-mono font-bold text-red-600 dark:text-red-400 text-sm">
+                                        {{ rd.jumlah.toLocaleString('id-ID') }}
+                                    </td>
+                                    <td class="whitespace-nowrap px-3 py-2.5 font-semibold text-gray-700 dark:text-gray-300">
+                                        {{ rd.material_uom || 'Pcs' }}
+                                    </td>
+                                    <td class="whitespace-nowrap px-3 py-2.5 font-mono text-xs">
+                                        <span v-if="rd.odoo_mo_name" class="rounded bg-amber-50 px-2 py-0.5 font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                            {{ rd.odoo_mo_name }}
+                                        </span>
+                                        <span v-else class="text-gray-400">-</span>
+                                    </td>
+                                    <td class="whitespace-nowrap px-3 py-2.5 text-[11px] text-gray-500 dark:text-gray-400">
+                                        <div>{{ new Date(rd.created_at).toLocaleDateString('id-ID') }}</div>
+                                        <div class="text-[10px] text-gray-400">{{ rd.creator?.name || 'Odoo MO (DONE)' }}</div>
+                                    </td>
+                                    <td class="whitespace-nowrap px-3 py-2.5 text-right">
+                                        <button
+                                            v-if="canDeleteReject(rd)"
+                                            type="button"
+                                            @click.stop="openDeleteModal(rd)"
+                                            class="text-red-600 hover:text-red-800 hover:underline dark:text-red-400 font-semibold"
+                                        >
+                                            Hapus
+                                        </button>
+                                        <span v-else class="text-gray-400">-</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- MOBILE CARD VIEW BREAKDOWN -->
+                <div class="block space-y-3 md:hidden">
+                    <div
+                        v-if="!rejectDetails?.data || rejectDetails.data.length === 0"
+                        class="rounded-xl border border-gray-200 bg-white p-6 text-center text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400"
+                    >
+                        Tidak ada data komponen reject
+                    </div>
+
+                    <div
+                        v-for="rd in rejectDetails?.data"
+                        :key="rd.id"
+                        class="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+                    >
+                        <div class="flex items-start justify-between gap-2 border-b border-gray-100 pb-2.5 dark:border-gray-700">
+                            <div>
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                    <span class="font-bold text-gray-900 dark:text-gray-100 text-sm">
+                                        {{ rd.material_name || rd.keterangan }}
+                                    </span>
+                                    <span class="inline-flex items-center rounded-full px-1.5 py-0.2 text-[9px] font-semibold border" :class="getItemCategory(rd.material_name).class">
+                                        {{ getItemCategory(rd.material_name).label }}
+                                    </span>
+                                    <button
+                                        v-if="getItemCategory(rd.material_name).canDecompose"
+                                        type="button"
+                                        @click.stop="openRecipeBreakdown(rd)"
+                                        class="inline-flex items-center gap-1 rounded bg-teal-50 px-1.5 py-0.5 text-[9px] font-bold text-teal-700 hover:bg-teal-100 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800 transition"
+                                    >
+                                        🧪 Uraian Bahan Baku
+                                    </button>
+                                </div>
+                                <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                                    Produk Jadi: <strong>{{ rd.laporan_harian?.produk?.nama_produk }}</strong>
+                                </div>
+                            </div>
+                            <span class="inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="getJenisBadge(rd.jenis_reject).class">
+                                {{ getJenisBadge(rd.jenis_reject).label }}
+                            </span>
+                        </div>
+
+                        <div class="my-2.5 grid grid-cols-2 gap-2 text-xs">
+                            <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/40">
+                                <span class="block text-[10px] text-gray-500 dark:text-gray-400">Batch & MO</span>
+                                <span class="font-mono font-bold text-gray-800 dark:text-gray-200">{{ rd.laporan_harian?.batch_number }}</span>
+                                <div v-if="rd.odoo_mo_name" class="font-mono text-[10px] text-amber-700 dark:text-amber-300 mt-0.5">{{ rd.odoo_mo_name }}</div>
+                            </div>
+                            <div class="rounded-lg bg-red-50/60 p-2 text-right dark:bg-red-950/30">
+                                <span class="block text-[10px] text-red-600 dark:text-red-400">Qty Reject</span>
+                                <span class="font-bold text-red-600 dark:text-red-400 font-mono text-sm">
+                                    {{ rd.jumlah.toLocaleString('id-ID') }}
+                                </span>
+                                <span class="text-[10px] text-gray-500 ml-0.5">{{ rd.material_uom || 'Pcs' }}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between text-[11px] text-gray-400 border-t border-gray-100 pt-2 dark:border-gray-700">
+                            <span>📅 {{ new Date(rd.created_at).toLocaleDateString('id-ID') }} · {{ rd.creator?.name || 'Odoo MO (DONE)' }}</span>
+                            <button v-if="canDeleteReject(rd)" @click.stop="openDeleteModal(rd)" class="text-red-600 font-semibold hover:underline">Hapus</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pagination for Breakdown View -->
+                <div v-if="rejectDetails" class="mt-3 border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800 sm:rounded-lg">
+                    <Pagination
+                        :current-page="rejectDetails.current_page"
+                        :last-page="rejectDetails.last_page"
+                        :total="rejectDetails.total"
+                        :per-page="rejectDetails.per_page"
+                        @page="goToRejectPage"
+                    />
+                </div>
+            </div>
+
             <!-- ========================================== -->
-            <!-- TAB 2: ODOO SCRAP ORDERS (LIVE)            -->
+            <!-- TAB 3: SCRAP ORDER ODOO ERP (LIVE)         -->
             <!-- ========================================== -->
             <div v-show="activeTab === 'odoo'">
-                <!-- Top Toolbar Responsive -->
-                <div
-                    class="mb-4 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between"
-                >
-                    <div
-                        class="flex flex-1 flex-col items-stretch gap-2.5 sm:flex-row sm:items-center"
-                    >
+                <div class="mb-4 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+                    <div class="flex flex-1 flex-col items-stretch gap-2.5 sm:flex-row sm:items-center">
                         <div class="relative w-full sm:w-80">
                             <input
                                 v-model="odooSearch"
@@ -1497,28 +1489,14 @@ const jenisLabel = computed(() => {
                                 placeholder="Cari no scrap, no batch, produk..."
                                 class="w-full rounded-md border-gray-300 pl-9 text-xs shadow-sm focus:border-red-500 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 sm:text-sm"
                             />
-                            <div
-                                class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3"
-                            >
-                                <svg
-                                    class="h-4 w-4 text-gray-400"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        stroke-width="2"
-                                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                                    />
+                            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                 </svg>
                             </div>
                         </div>
 
-                        <div
-                            class="flex items-center justify-between gap-1.5 text-xs text-gray-600 dark:text-gray-400 sm:justify-start"
-                        >
+                        <div class="flex items-center justify-between gap-1.5 text-xs text-gray-600 dark:text-gray-400 sm:justify-start">
                             <span>Tampilkan:</span>
                             <select
                                 v-model="odooPerPage"
@@ -1541,475 +1519,163 @@ const jenisLabel = computed(() => {
                             :disabled="isLoadingOdooScraps"
                             class="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-white px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-700 dark:hover:bg-gray-700 sm:w-auto"
                         >
-                            <svg
-                                class="h-4 w-4 text-red-600"
-                                :class="{ 'animate-spin': isLoadingOdooScraps }"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                                />
+                            <svg class="h-4 w-4 text-red-600" :class="{ 'animate-spin': isLoadingOdooScraps }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                             </svg>
-                            {{
-                                isLoadingOdooScraps
-                                    ? 'Memuat...'
-                                    : 'Muat Ulang dari Odoo'
-                            }}
+                            {{ isLoadingOdooScraps ? 'Memuat...' : 'Muat Ulang dari Odoo' }}
                         </button>
                     </div>
                 </div>
 
                 <!-- Info Box -->
-                <div
-                    class="mb-4 flex flex-col justify-between gap-1.5 rounded-lg border border-red-100 bg-red-50/50 p-3 text-xs text-red-800 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300 sm:flex-row sm:items-center"
-                >
+                <div class="mb-4 flex flex-col justify-between gap-1.5 rounded-lg border border-red-100 bg-red-50/50 p-3 text-xs text-red-800 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300 sm:flex-row sm:items-center">
                     <div class="flex items-center gap-2">
-                        <span
-                            class="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500"
-                        ></span>
-                        <span
-                            >💡
-                            <em
-                                >Klik pada baris/kartu untuk membuka detail
-                                Scrap Order Odoo.</em
-                            ></span
-                        >
+                        <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500"></span>
+                        <span>💡 <em>Klik pada baris/kartu untuk membuka detail Scrap Order Odoo.</em></span>
                     </div>
-                    <span
-                        v-if="filteredOdooScraps.length > 0"
-                        class="font-medium text-red-900 dark:text-red-200"
-                    >
+                    <span v-if="filteredOdooScraps.length > 0" class="font-medium text-red-900 dark:text-red-200">
                         Total: {{ filteredOdooScraps.length }} Scrap Order
                     </span>
                 </div>
 
                 <!-- Error Message -->
-                <div
-                    v-if="odooScrapError"
-                    class="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300"
-                >
+                <div v-if="odooScrapError" class="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2">
-                            <svg
-                                class="h-5 w-5 text-red-500"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                                />
+                            <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                             </svg>
                             <span>{{ odooScrapError }}</span>
                         </div>
-                        <button
-                            @click="fetchOdooScraps"
-                            class="font-semibold underline hover:text-red-900 dark:hover:text-red-100"
-                        >
+                        <button @click="fetchOdooScraps" class="font-semibold underline hover:text-red-900 dark:hover:text-red-100">
                             Coba Lagi
                         </button>
                     </div>
                 </div>
 
-                <!-- DESKTOP TABLE VIEW ODOO (md and up) -->
-                <div
-                    class="hidden overflow-hidden bg-white shadow-sm dark:bg-gray-800 sm:rounded-lg md:block"
-                >
+                <!-- DESKTOP TABLE VIEW ODOO -->
+                <div class="hidden overflow-hidden bg-white shadow-sm dark:bg-gray-800 sm:rounded-lg md:block border border-gray-200 dark:border-gray-700">
                     <div class="overflow-x-auto">
-                        <table
-                            class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm"
-                        >
+                        <table class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm">
                             <thead class="bg-gray-50 dark:bg-gray-700/70">
                                 <tr>
-                                    <th
-                                        class="w-8 px-2 py-2.5 text-center text-xs font-semibold uppercase text-gray-400"
-                                    ></th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
-                                        No. Dokumen
-                                    </th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
-                                        No. Batch
-                                    </th>
-                                    <th
-                                        class="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
-                                        Produk
-                                    </th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
-                                        Qty Reject
-                                    </th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
-                                        Tanggal
-                                    </th>
-                                    <th
-                                        class="whitespace-nowrap px-3 py-2.5 text-center text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300"
-                                    >
-                                        Status
-                                    </th>
+                                    <th class="w-8 px-2 py-2.5 text-center text-xs font-semibold uppercase text-gray-400"></th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">No. Dokumen</th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">No. Batch</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Produk / Komponen</th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Qty Reject</th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Tanggal</th>
+                                    <th class="whitespace-nowrap px-3 py-2.5 text-center text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Status</th>
                                 </tr>
                             </thead>
-                            <tbody
-                                class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800"
-                            >
+                            <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                                 <tr v-if="isLoadingOdooScraps">
-                                    <td
-                                        colspan="7"
-                                        class="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400"
-                                    >
-                                        <div
-                                            class="flex flex-col items-center justify-center gap-2"
-                                        >
-                                            <svg
-                                                class="h-6 w-6 animate-spin text-red-600"
-                                                fill="none"
-                                                viewBox="0 0 24 24"
-                                                stroke="currentColor"
-                                            >
-                                                <path
-                                                    stroke-linecap="round"
-                                                    stroke-linejoin="round"
-                                                    stroke-width="2"
-                                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                                                />
+                                    <td colspan="7" class="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                                        <div class="flex flex-col items-center justify-center gap-2">
+                                            <svg class="h-6 w-6 animate-spin text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                             </svg>
-                                            <span
-                                                >Menghubungi Odoo ERP dan
-                                                mengambil data Scrap...</span
-                                            >
+                                            <span>Menghubungi Odoo ERP dan mengambil data Scrap...</span>
                                         </div>
                                     </td>
                                 </tr>
-                                <tr
-                                    v-else-if="paginatedOdooScraps.length === 0"
-                                >
-                                    <td
-                                        colspan="7"
-                                        class="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400"
-                                    >
-                                        <div
-                                            class="flex flex-col items-center justify-center gap-1"
-                                        >
-                                            <svg
-                                                class="h-8 w-8 text-gray-400"
-                                                fill="none"
-                                                viewBox="0 0 24 24"
-                                                stroke="currentColor"
-                                            >
-                                                <path
-                                                    stroke-linecap="round"
-                                                    stroke-linejoin="round"
-                                                    stroke-width="1.5"
-                                                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-                                                />
-                                            </svg>
-                                            <p
-                                                class="font-medium text-gray-700 dark:text-gray-300"
-                                            >
-                                                Tidak ada data Scrap Order di
-                                                Odoo
-                                            </p>
-                                            <p class="text-xs text-gray-400">
-                                                Pastikan modul Inventory Odoo
-                                                aktif atau lakukan transaksi
-                                                reject dari LinePulse.
-                                            </p>
-                                        </div>
+                                <tr v-else-if="paginatedOdooScraps.length === 0">
+                                    <td colspan="7" class="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                                        Tidak ada data Scrap Order di Odoo
                                     </td>
                                 </tr>
-                                <template
-                                    v-for="scrap in paginatedOdooScraps"
-                                    :key="scrap.id"
-                                >
+                                <template v-for="scrap in paginatedOdooScraps" :key="scrap.id">
                                     <tr
                                         @click="toggleOdooScrapExpand(scrap.id)"
                                         class="cursor-pointer transition hover:bg-red-50/40 dark:hover:bg-gray-700/60"
-                                        :class="{
-                                            'bg-red-50/20 dark:bg-gray-700/30':
-                                                expandedOdooScraps[scrap.id],
-                                        }"
+                                        :class="{ 'bg-red-50/20 dark:bg-gray-700/30': expandedOdooScraps[scrap.id] }"
                                     >
-                                        <td
-                                            class="px-2 py-2.5 text-center text-gray-400"
-                                        >
+                                        <td class="px-2 py-2.5 text-center text-gray-400">
                                             <svg
                                                 class="h-4 w-4 text-gray-400 transition-transform duration-200"
-                                                :class="{
-                                                    'rotate-90 text-red-600':
-                                                        expandedOdooScraps[
-                                                            scrap.id
-                                                        ],
-                                                }"
+                                                :class="{ 'rotate-90 text-red-600': expandedOdooScraps[scrap.id] }"
                                                 fill="none"
                                                 viewBox="0 0 24 24"
                                                 stroke="currentColor"
                                             >
-                                                <path
-                                                    stroke-linecap="round"
-                                                    stroke-linejoin="round"
-                                                    stroke-width="2"
-                                                    d="M9 5l7 7-7 7"
-                                                />
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                                             </svg>
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 font-mono font-bold text-red-600 dark:text-red-400"
-                                        >
+                                        <td class="whitespace-nowrap px-3 py-2.5 font-mono font-bold text-red-600 dark:text-red-400">
                                             {{ scrap.name }}
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 font-mono font-bold text-gray-900 dark:text-gray-100"
-                                        >
-                                            <span
-                                                class="rounded bg-red-50 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300"
-                                            >
+                                        <td class="whitespace-nowrap px-3 py-2.5 font-mono font-bold text-gray-900 dark:text-gray-100">
+                                            <span class="rounded bg-red-50 px-2 py-0.5 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">
                                                 {{ scrap.batch_number }}
                                             </span>
                                         </td>
-                                        <td
-                                            class="px-3 py-2.5 font-medium text-gray-900 dark:text-gray-100"
-                                        >
+                                        <td class="px-3 py-2.5 font-medium text-gray-900 dark:text-gray-100">
                                             {{ scrap.product_name }}
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 text-right font-bold text-red-600 dark:text-red-400"
-                                        >
-                                            {{
-                                                Number(
-                                                    scrap.scrap_qty,
-                                                ).toLocaleString('id-ID')
-                                            }}
+                                        <td class="whitespace-nowrap px-3 py-2.5 text-right font-bold text-red-600 dark:text-red-400">
+                                            {{ Number(scrap.scrap_qty).toLocaleString('id-ID') }} {{ scrap.uom }}
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 text-gray-600 dark:text-gray-300"
-                                        >
-                                            {{
-                                                scrap.date
-                                                    ? formatDate(scrap.date)
-                                                    : '-'
-                                            }}
+                                        <td class="whitespace-nowrap px-3 py-2.5 text-gray-600 dark:text-gray-300">
+                                            {{ scrap.date ? formatDate(scrap.date) : '-' }}
                                         </td>
-                                        <td
-                                            class="whitespace-nowrap px-3 py-2.5 text-center"
-                                        >
+                                        <td class="whitespace-nowrap px-3 py-2.5 text-center">
                                             <span
                                                 class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize"
-                                                :class="
-                                                    scrap.state === 'done'
-                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
-                                                        : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
-                                                "
+                                                :class="scrap.state === 'done' ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'"
                                             >
                                                 {{ scrap.state }}
                                             </span>
                                         </td>
                                     </tr>
 
-                                    <!-- DROPDOWN ACCORDION DETAIL SCRAP ORDER ODOO -->
-                                    <tr
-                                        v-if="expandedOdooScraps[scrap.id]"
-                                        class="bg-gray-50/90 dark:bg-gray-900/60"
-                                    >
+                                    <!-- ACCORDION DETAIL SCRAP ORDER -->
+                                    <tr v-if="expandedOdooScraps[scrap.id]" class="bg-gray-50/90 dark:bg-gray-900/60">
                                         <td colspan="7" class="p-3 sm:p-4">
-                                            <div
-                                                class="rounded-xl border border-red-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800"
-                                            >
-                                                <div
-                                                    class="mb-3 flex items-center justify-between border-b border-gray-100 pb-3 dark:border-gray-700"
-                                                >
-                                                    <div
-                                                        class="flex items-center gap-2"
-                                                    >
-                                                        <span
-                                                            class="text-sm font-bold text-gray-900 dark:text-gray-100"
-                                                        >
-                                                            Detail Dokumen Odoo:
-                                                            <span
-                                                                class="font-mono text-red-600 dark:text-red-400"
-                                                                >{{
-                                                                    scrap.name
-                                                                }}</span
-                                                            >
+                                            <div class="rounded-xl border border-red-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                                                <div class="mb-3 flex items-center justify-between border-b border-gray-100 pb-3 dark:border-gray-700">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-sm font-bold text-gray-900 dark:text-gray-100">
+                                                            Detail Dokumen Odoo: <span class="font-mono text-red-600 dark:text-red-400">{{ scrap.name }}</span>
                                                         </span>
-                                                        <span
-                                                            class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase"
-                                                            :class="
-                                                                scrap.state ===
-                                                                'done'
-                                                                    ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
-                                                                    : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
-                                                            "
-                                                        >
+                                                        <span class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
                                                             {{ scrap.state }}
                                                         </span>
                                                     </div>
-                                                    <span
-                                                        class="text-xs text-gray-400"
-                                                        >ID Record Odoo: #{{
-                                                            scrap.id
-                                                        }}</span
-                                                    >
+                                                    <span class="text-xs text-gray-400">ID Record Odoo: #{{ scrap.id }}</span>
                                                 </div>
 
-                                                <div
-                                                    class="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2 md:grid-cols-4"
-                                                >
-                                                    <div
-                                                        class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40"
-                                                    >
-                                                        <p
-                                                            class="font-medium text-gray-500 dark:text-gray-400"
-                                                        >
-                                                            🏷️ Nomor Batch (Lot
-                                                            / Serial)
-                                                        </p>
-                                                        <p
-                                                            class="mt-1 font-mono text-sm font-bold text-red-600 dark:text-red-400"
-                                                        >
-                                                            {{
-                                                                scrap.batch_number
-                                                            }}
-                                                        </p>
+                                                <div class="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2 md:grid-cols-4">
+                                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40">
+                                                        <p class="font-medium text-gray-500 dark:text-gray-400">🏷️ Nomor Batch (Lot / Serial)</p>
+                                                        <p class="mt-1 font-mono text-sm font-bold text-red-600 dark:text-red-400">{{ scrap.batch_number }}</p>
                                                     </div>
-
-                                                    <div
-                                                        class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40"
-                                                    >
-                                                        <p
-                                                            class="font-medium text-gray-500 dark:text-gray-400"
-                                                        >
-                                                            📦 Produk
-                                                        </p>
-                                                        <p
-                                                            class="mt-1 font-semibold text-gray-900 dark:text-gray-100"
-                                                        >
-                                                            {{
-                                                                scrap.product_name
-                                                            }}
-                                                        </p>
+                                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40">
+                                                        <p class="font-medium text-gray-500 dark:text-gray-400">📦 Produk / Komponen</p>
+                                                        <p class="mt-1 font-semibold text-gray-900 dark:text-gray-100">{{ scrap.product_name }}</p>
                                                     </div>
-
-                                                    <div
-                                                        class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40"
-                                                    >
-                                                        <p
-                                                            class="font-medium text-gray-500 dark:text-gray-400"
-                                                        >
-                                                            🔢 Jumlah Reject
-                                                        </p>
-                                                        <p
-                                                            class="mt-1 text-sm font-bold text-red-600 dark:text-red-400"
-                                                        >
-                                                            {{
-                                                                Number(
-                                                                    scrap.scrap_qty,
-                                                                ).toLocaleString(
-                                                                    'id-ID',
-                                                                )
-                                                            }}
-                                                            {{ scrap.uom }}
-                                                        </p>
+                                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40">
+                                                        <p class="font-medium text-gray-500 dark:text-gray-400">🔢 Jumlah Reject</p>
+                                                        <p class="mt-1 text-sm font-bold text-red-600 dark:text-red-400">{{ Number(scrap.scrap_qty).toLocaleString('id-ID') }} {{ scrap.uom }}</p>
                                                     </div>
-
-                                                    <div
-                                                        class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40"
-                                                    >
-                                                        <p
-                                                            class="font-medium text-gray-500 dark:text-gray-400"
-                                                        >
-                                                            📅 Tanggal Scrap
-                                                        </p>
-                                                        <p
-                                                            class="mt-1 font-medium text-gray-900 dark:text-gray-100"
-                                                        >
-                                                            {{
-                                                                scrap.date
-                                                                    ? formatDate(
-                                                                          scrap.date,
-                                                                      )
-                                                                    : '-'
-                                                            }}
-                                                        </p>
+                                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40">
+                                                        <p class="font-medium text-gray-500 dark:text-gray-400">📅 Tanggal Scrap</p>
+                                                        <p class="mt-1 font-medium text-gray-900 dark:text-gray-100">{{ scrap.date ? formatDate(scrap.date) : '-' }}</p>
                                                     </div>
-
-                                                    <div
-                                                        class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40"
-                                                    >
-                                                        <p
-                                                            class="font-medium text-gray-500 dark:text-gray-400"
-                                                        >
-                                                            📍 Lokasi Asal
-                                                            (Source)
-                                                        </p>
-                                                        <p
-                                                            class="mt-1 font-medium text-gray-900 dark:text-gray-100"
-                                                        >
-                                                            {{ scrap.location }}
-                                                        </p>
+                                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40">
+                                                        <p class="font-medium text-gray-500 dark:text-gray-400">📍 Lokasi Asal</p>
+                                                        <p class="mt-1 font-medium text-gray-900 dark:text-gray-100">{{ scrap.location }}</p>
                                                     </div>
-
-                                                    <div
-                                                        class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40"
-                                                    >
-                                                        <p
-                                                            class="font-medium text-gray-500 dark:text-gray-400"
-                                                        >
-                                                            🗑️ Lokasi Pemusnahan
-                                                            (Scrap)
-                                                        </p>
-                                                        <p
-                                                            class="mt-1 font-medium text-gray-900 dark:text-gray-100"
-                                                        >
-                                                            {{
-                                                                scrap.scrap_location
-                                                            }}
-                                                        </p>
+                                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40">
+                                                        <p class="font-medium text-gray-500 dark:text-gray-400">🗑️ Lokasi Pemusnahan</p>
+                                                        <p class="mt-1 font-medium text-gray-900 dark:text-gray-100">{{ scrap.scrap_location }}</p>
                                                     </div>
-
-                                                    <div
-                                                        class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40"
-                                                    >
-                                                        <p
-                                                            class="font-medium text-gray-500 dark:text-gray-400"
-                                                        >
-                                                            👤 Dicatat Oleh
-                                                        </p>
-                                                        <p
-                                                            class="mt-1 font-medium text-gray-900 dark:text-gray-100"
-                                                        >
-                                                            {{ scrap.creator }}
-                                                        </p>
+                                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40">
+                                                        <p class="font-medium text-gray-500 dark:text-gray-400">👤 Dicatat Oleh</p>
+                                                        <p class="mt-1 font-medium text-gray-900 dark:text-gray-100">{{ scrap.creator }}</p>
                                                     </div>
-
-                                                    <div
-                                                        class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40"
-                                                    >
-                                                        <p
-                                                            class="font-medium text-gray-500 dark:text-gray-400"
-                                                        >
-                                                            📝 Referensi Dokumen
-                                                            (Origin)
-                                                        </p>
-                                                        <p
-                                                            class="mt-1 font-mono text-gray-900 dark:text-gray-100"
-                                                        >
-                                                            {{ scrap.origin }}
-                                                        </p>
+                                                    <div class="rounded-lg bg-gray-50 p-3 dark:bg-gray-900/40">
+                                                        <p class="font-medium text-gray-500 dark:text-gray-400">📝 Referensi Dokumen</p>
+                                                        <p class="mt-1 font-mono text-gray-900 dark:text-gray-100">{{ scrap.origin }}</p>
                                                     </div>
                                                 </div>
                                             </div>
@@ -2021,283 +1687,36 @@ const jenisLabel = computed(() => {
                     </div>
                 </div>
 
-                <!-- MOBILE CARD VIEW ODOO (md:hidden) -->
+                <!-- MOBILE VIEW ODOO -->
                 <div class="block space-y-3 md:hidden">
-                    <div
-                        v-if="isLoadingOdooScraps"
-                        class="rounded-xl border border-gray-200 bg-white p-8 text-center text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800"
-                    >
-                        <div
-                            class="flex flex-col items-center justify-center gap-2"
-                        >
-                            <svg
-                                class="h-6 w-6 animate-spin text-red-600"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                                />
-                            </svg>
-                            <span>Memuat data dari Odoo ERP...</span>
-                        </div>
-                    </div>
-
-                    <div
-                        v-else-if="paginatedOdooScraps.length === 0"
-                        class="rounded-xl border border-gray-200 bg-white p-6 text-center text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800"
-                    >
+                    <div v-if="paginatedOdooScraps.length === 0" class="rounded-xl border border-gray-200 bg-white p-6 text-center text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
                         Tidak ada data Scrap Order di Odoo.
                     </div>
-
-                    <div
-                        v-else
-                        v-for="scrap in paginatedOdooScraps"
-                        :key="scrap.id"
-                        class="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm transition dark:border-gray-700 dark:bg-gray-800"
-                    >
-                        <div
-                            class="flex items-start justify-between gap-2 border-b border-gray-100 pb-2.5 dark:border-gray-700"
-                        >
+                    <div v-for="scrap in paginatedOdooScraps" :key="scrap.id" class="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                        <div class="flex items-start justify-between gap-2 border-b border-gray-100 pb-2.5 dark:border-gray-700">
                             <div>
-                                <span
-                                    class="font-mono text-sm font-bold text-red-600 dark:text-red-400"
-                                    >{{ scrap.name }}</span
-                                >
-                                <h3
-                                    class="mt-0.5 text-sm font-bold text-gray-900 dark:text-gray-100"
-                                >
-                                    {{ scrap.product_name }}
-                                </h3>
+                                <span class="font-mono text-sm font-bold text-red-600 dark:text-red-400">{{ scrap.name }}</span>
+                                <h3 class="mt-0.5 text-sm font-bold text-gray-900 dark:text-gray-100">{{ scrap.product_name }}</h3>
                             </div>
-                            <span
-                                class="inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize"
-                                :class="
-                                    scrap.state === 'done'
-                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
-                                        : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
-                                "
-                            >
+                            <span class="inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">
                                 {{ scrap.state }}
                             </span>
                         </div>
-
                         <div class="my-2.5 grid grid-cols-2 gap-2 text-xs">
-                            <div
-                                class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/40"
-                            >
-                                <span
-                                    class="block text-[10px] text-gray-500 dark:text-gray-400"
-                                    >Batch / Lot</span
-                                >
-                                <span
-                                    class="font-mono font-bold text-red-600 dark:text-red-400"
-                                    >{{ scrap.batch_number }}</span
-                                >
+                            <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/40">
+                                <span class="block text-[10px] text-gray-500">Batch / Lot</span>
+                                <span class="font-mono font-bold text-red-600">{{ scrap.batch_number }}</span>
                             </div>
-                            <div
-                                class="rounded-lg bg-red-50/60 p-2 text-right dark:bg-red-950/30"
-                            >
-                                <span
-                                    class="block text-[10px] text-red-600 dark:text-red-400"
-                                    >Qty Reject</span
-                                >
-                                <span
-                                    class="font-bold text-red-600 dark:text-red-400"
-                                    >{{
-                                        Number(scrap.scrap_qty).toLocaleString(
-                                            'id-ID',
-                                        )
-                                    }}
-                                    {{ scrap.uom }}</span
-                                >
-                            </div>
-                        </div>
-
-                        <div
-                            class="flex items-center justify-between gap-2 border-t border-gray-100 pt-2.5 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400"
-                        >
-                            <span
-                                >📅
-                                {{
-                                    scrap.date ? formatDate(scrap.date) : '-'
-                                }}</span
-                            >
-                            <button
-                                type="button"
-                                @click="toggleOdooScrapExpand(scrap.id)"
-                                class="inline-flex items-center gap-1 font-semibold text-red-600 hover:text-red-700 dark:text-red-400"
-                            >
-                                <span>{{
-                                    expandedOdooScraps[scrap.id]
-                                        ? 'Tutup Detail'
-                                        : 'Lihat Detail'
-                                }}</span>
-                                <svg
-                                    class="h-3.5 w-3.5 transition-transform"
-                                    :class="{
-                                        'rotate-180':
-                                            expandedOdooScraps[scrap.id],
-                                    }"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        stroke-width="2"
-                                        d="M19 9l-7 7-7-7"
-                                    />
-                                </svg>
-                            </button>
-                        </div>
-
-                        <!-- Expanded Odoo Scrap Mobile Detail (Full Desktop Matching) -->
-                        <div
-                            v-if="expandedOdooScraps[scrap.id]"
-                            class="mt-3 space-y-2.5 border-t border-dashed border-gray-200 pt-3 dark:border-gray-700"
-                        >
-                            <div
-                                class="flex items-center justify-between text-[11px]"
-                            >
-                                <span
-                                    class="font-semibold text-gray-700 dark:text-gray-300"
-                                    >Detail Dokumen Odoo:</span
-                                >
-                                <span class="font-mono text-gray-400"
-                                    >ID Record: #{{ scrap.id }}</span
-                                >
-                            </div>
-
-                            <div class="grid grid-cols-2 gap-2 text-xs">
-                                <div
-                                    class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50 sm:p-2.5"
-                                >
-                                    <span
-                                        class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 sm:text-[10.5px]"
-                                        >🏷️ No. Batch</span
-                                    >
-                                    <span
-                                        class="mt-0.5 block truncate font-mono text-xs font-bold text-red-600 dark:text-red-400"
-                                        >{{ scrap.batch_number }}</span
-                                    >
-                                </div>
-
-                                <div
-                                    class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50 sm:p-2.5"
-                                >
-                                    <span
-                                        class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 sm:text-[10.5px]"
-                                        >📦 Produk</span
-                                    >
-                                    <span
-                                        class="mt-0.5 block truncate text-[11px] font-semibold text-gray-900 dark:text-gray-100 sm:text-xs"
-                                        >{{ scrap.product_name }}</span
-                                    >
-                                </div>
-
-                                <div
-                                    class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50 sm:p-2.5"
-                                >
-                                    <span
-                                        class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 sm:text-[10.5px]"
-                                        >🔢 Qty Reject</span
-                                    >
-                                    <span
-                                        class="mt-0.5 block text-xs font-bold text-red-600 dark:text-red-400"
-                                    >
-                                        {{
-                                            Number(
-                                                scrap.scrap_qty,
-                                            ).toLocaleString('id-ID')
-                                        }}
-                                        {{ scrap.uom }}
-                                    </span>
-                                </div>
-
-                                <div
-                                    class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50 sm:p-2.5"
-                                >
-                                    <span
-                                        class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 sm:text-[10.5px]"
-                                        >📅 Tgl Scrap</span
-                                    >
-                                    <span
-                                        class="mt-0.5 block truncate text-[11px] font-medium text-gray-900 dark:text-gray-100 sm:text-xs"
-                                        >{{
-                                            scrap.date
-                                                ? formatDate(scrap.date)
-                                                : '-'
-                                        }}</span
-                                    >
-                                </div>
-
-                                <div
-                                    class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50 sm:p-2.5"
-                                >
-                                    <span
-                                        class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 sm:text-[10.5px]"
-                                        >📍 Lokasi Asal</span
-                                    >
-                                    <span
-                                        class="mt-0.5 block break-words text-[11px] font-medium text-gray-900 dark:text-gray-100 sm:text-xs"
-                                        >{{ scrap.location }}</span
-                                    >
-                                </div>
-
-                                <div
-                                    class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50 sm:p-2.5"
-                                >
-                                    <span
-                                        class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 sm:text-[10.5px]"
-                                        >🗑️ Lokasi Scrap</span
-                                    >
-                                    <span
-                                        class="mt-0.5 block break-words text-[11px] font-medium text-gray-900 dark:text-gray-100 sm:text-xs"
-                                        >{{ scrap.scrap_location }}</span
-                                    >
-                                </div>
-
-                                <div
-                                    class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50 sm:p-2.5"
-                                >
-                                    <span
-                                        class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 sm:text-[10.5px]"
-                                        >👤 Dicatat Oleh</span
-                                    >
-                                    <span
-                                        class="mt-0.5 block truncate text-[11px] font-medium text-gray-900 dark:text-gray-100 sm:text-xs"
-                                        >{{ scrap.creator }}</span
-                                    >
-                                </div>
-
-                                <div
-                                    class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50 sm:p-2.5"
-                                >
-                                    <span
-                                        class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 sm:text-[10.5px]"
-                                        >📝 Origin Ref</span
-                                    >
-                                    <span
-                                        class="mt-0.5 block truncate font-mono text-[11px] font-medium text-gray-900 dark:text-gray-100 sm:text-xs"
-                                        >{{ scrap.origin }}</span
-                                    >
-                                </div>
+                            <div class="rounded-lg bg-red-50/60 p-2 text-right dark:bg-red-950/30">
+                                <span class="block text-[10px] text-red-600">Qty Reject</span>
+                                <span class="font-bold text-red-600">{{ Number(scrap.scrap_qty).toLocaleString('id-ID') }} {{ scrap.uom }}</span>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Pagination for Odoo Live Scraps -->
-                <div
-                    v-if="filteredOdooScraps.length > 0"
-                    class="mt-3 border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800 sm:rounded-lg"
-                >
+                <div v-if="filteredOdooScraps.length > 0" class="mt-3 border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800 sm:rounded-lg">
                     <Pagination
                         :current-page="odooCurrentPage"
                         :last-page="odooLastPage"
@@ -2314,96 +1733,26 @@ const jenisLabel = computed(() => {
         <!-- ========================================== -->
         <Modal :show="showModal" maxWidth="lg" @close="closeModal">
             <div class="p-6">
-                <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">
-                    Form Reject Produk
-                </h2>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Lengkapi data reject. Data produksi di bawah bersifat
-                    readonly.
-                </p>
+                <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">Form Reject Produk</h2>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Lengkapi data reject. Data produksi di bawah bersifat readonly.</p>
 
-                <!-- Info Produk -->
-                <div
-                    v-if="selected"
-                    class="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/30"
-                >
-                    <h3
-                        class="mb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400"
-                    >
-                        Informasi Batch & Produk
-                    </h3>
+                <div v-if="selected" class="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/30">
                     <dl class="grid grid-cols-2 gap-3 text-sm">
                         <div>
-                            <dt class="text-gray-500 dark:text-gray-400">
-                                No. Batch
-                            </dt>
-                            <dd
-                                class="mt-0.5 font-mono font-bold text-red-600 dark:text-red-400"
-                            >
-                                {{ selected.batch_number }}
-                            </dd>
+                            <dt class="text-gray-500 dark:text-gray-400 text-xs">No. Batch</dt>
+                            <dd class="mt-0.5 font-mono font-bold text-red-600 dark:text-red-400">{{ selected.batch_number }}</dd>
                         </div>
                         <div>
-                            <dt class="text-gray-500 dark:text-gray-400">
-                                Nama Produk
-                            </dt>
-                            <dd
-                                class="mt-0.5 font-medium text-gray-900 dark:text-gray-100"
-                            >
-                                {{ selected.produk?.nama_produk }}
-                            </dd>
+                            <dt class="text-gray-500 dark:text-gray-400 text-xs">Nama Produk</dt>
+                            <dd class="mt-0.5 font-medium text-gray-900 dark:text-gray-100">{{ selected.produk?.nama_produk }}</dd>
                         </div>
                         <div>
-                            <dt class="text-gray-500 dark:text-gray-400">
-                                Process
-                            </dt>
-                            <dd
-                                class="mt-0.5 font-medium text-gray-900 dark:text-gray-100"
-                            >
-                                {{
-                                    prosesLabel[selected.proses] ??
-                                    selected.proses
-                                }}
-                            </dd>
+                            <dt class="text-gray-500 dark:text-gray-400 text-xs">Process</dt>
+                            <dd class="mt-0.5 font-medium text-gray-900 dark:text-gray-100">{{ prosesLabel[selected.proses] ?? selected.proses }}</dd>
                         </div>
                         <div>
-                            <dt class="text-gray-500 dark:text-gray-400">
-                                Tanggal Process
-                            </dt>
-                            <dd
-                                class="mt-0.5 font-medium text-gray-900 dark:text-gray-100"
-                            >
-                                {{ formatDate(selected.tanggal) }}
-                            </dd>
-                        </div>
-                        <div>
-                            <dt class="text-gray-500 dark:text-gray-400">
-                                Qty Tersedia
-                            </dt>
-                            <dd
-                                class="mt-0.5 font-medium text-gray-900 dark:text-gray-100"
-                            >
-                                {{
-                                    selected.available_qty.toLocaleString(
-                                        'id-ID',
-                                    )
-                                }}
-                            </dd>
-                        </div>
-                        <div>
-                            <dt class="text-gray-500 dark:text-gray-400">
-                                Sisa yang dapat direject
-                            </dt>
-                            <dd
-                                class="mt-0.5 font-semibold"
-                                :class="
-                                    selected.sisa_qty === 0
-                                        ? 'text-red-600'
-                                        : 'text-green-600'
-                                "
-                            >
-                                {{ selected.sisa_qty.toLocaleString('id-ID') }}
-                            </dd>
+                            <dt class="text-gray-500 dark:text-gray-400 text-xs">Qty Tersedia</dt>
+                            <dd class="mt-0.5 font-medium text-gray-900 dark:text-gray-100">{{ selected.available_qty.toLocaleString('id-ID') }}</dd>
                         </div>
                     </dl>
                 </div>
@@ -2414,27 +1763,21 @@ const jenisLabel = computed(() => {
                         <textarea
                             v-model="form.alasan_reject"
                             rows="3"
-                            placeholder="Masukkan detail alasan reject..."
-                            class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:focus:border-indigo-600 dark:focus:ring-indigo-600"
+                            placeholder="Masukkan detail alasan reject (misal: botol pecah, segel rusak, cacat cetak)..."
+                            class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-red-500 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                         ></textarea>
-                        <InputError
-                            :message="errors.alasan_reject"
-                            class="mt-1"
-                        />
+                        <InputError :message="errors.alasan_reject" class="mt-1" />
                     </div>
                     <div>
-                        <InputLabel value="Qty Reject (Pcs)" />
+                        <InputLabel value="Qty Reject" />
                         <TextInput
                             v-model="form.qty_reject"
                             type="number"
                             min="1"
-                            step="1"
                             class="no-spinner mt-1 block w-full"
                             placeholder="0"
                         />
-                        <p
-                            class="mt-1 text-xs text-gray-500 dark:text-gray-400"
-                        >
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                             Maksimal reject: {{ selected?.sisa_qty ?? 0 }} pcs
                         </p>
                         <InputError :message="errors.qty_reject" class="mt-1" />
@@ -2443,152 +1786,192 @@ const jenisLabel = computed(() => {
                         <InputLabel value="Jenis Reject" />
                         <select
                             v-model="form.jenis_reject"
-                            class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+                            class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-red-500 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                         >
-                            <option value="" disabled>
-                                Pilih Jenis Reject
-                            </option>
-                            <option
-                                v-for="opt in jenisOptions"
-                                :key="opt.value"
-                                :value="opt.value"
-                            >
+                            <option value="" disabled>Pilih Jenis Reject</option>
+                            <option v-for="opt in jenisOptions" :key="opt.value" :value="opt.value">
                                 {{ opt.label }}
                             </option>
                         </select>
-                        <p
-                            v-if="form.jenis_reject === 'process' && selected"
-                            class="mt-1 text-xs text-gray-500 dark:text-gray-400"
-                        >
-                            Akan disimpan sebagai reject proses:
-                            <span class="font-semibold">{{
-                                prosesLabel[selected.proses] ?? selected.proses
-                            }}</span>
-                            (otomatis dari data produksi)
-                        </p>
-                        <InputError
-                            :message="errors.jenis_reject"
-                            class="mt-1"
-                        />
+                        <InputError :message="errors.jenis_reject" class="mt-1" />
                     </div>
                 </div>
 
                 <div class="mt-6 flex justify-end gap-2">
                     <SecondaryButton @click="closeModal">Batal</SecondaryButton>
-                    <PrimaryButton @click="onSubmit" :disabled="isSubmitting">{{
-                        isSubmitting ? 'Menyimpan...' : 'Simpan Reject'
-                    }}</PrimaryButton>
+                    <PrimaryButton @click="onSubmit" :disabled="isSubmitting">{{ isSubmitting ? 'Menyimpan...' : 'Simpan Reject' }}</PrimaryButton>
                 </div>
             </div>
         </Modal>
 
-        <!-- ========================================== -->
-        <!-- MODAL KONFIRMASI SIMPAN REJECT             -->
-        <!-- ========================================== -->
+        <!-- MODAL KONFIRMASI SIMPAN REJECT -->
         <Modal :show="showConfirm" maxWidth="md" @close="showConfirm = false">
             <div class="p-6">
-                <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">
-                    Konfirmasi Reject
-                </h2>
-                <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-                    Apakah Anda yakin ingin melakukan reject terhadap produk
-                    ini?
-                </p>
-                <div
-                    v-if="selected"
-                    class="mt-4 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm dark:border-gray-700 dark:bg-gray-900/30"
-                >
-                    <p>
-                        <span class="text-gray-500">No. Batch:</span>
-                        <span
-                            class="font-mono font-bold text-red-600 dark:text-red-400"
-                            >{{ selected.batch_number }}</span
-                        >
-                    </p>
-                    <p>
-                        <span class="text-gray-500">Produk:</span>
-                        <span
-                            class="font-medium text-gray-900 dark:text-gray-100"
-                            >{{ selected.produk?.nama_produk }}</span
-                        >
-                    </p>
-                    <p>
-                        <span class="text-gray-500">Qty Reject:</span>
-                        <span class="font-bold text-red-600 dark:text-red-400"
-                            >{{ form.qty_reject }} pcs</span
-                        >
-                    </p>
-                    <p>
-                        <span class="text-gray-500">Jenis Reject:</span>
-                        <span
-                            class="font-medium text-gray-900 dark:text-gray-100"
-                            >{{ jenisLabel }}</span
-                        >
-                    </p>
+                <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">Konfirmasi Reject</h2>
+                <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Apakah Anda yakin ingin menyimpan reject ini?</p>
+                <div v-if="selected" class="mt-4 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm dark:border-gray-700 dark:bg-gray-900/30">
+                    <p><span class="text-gray-500">No. Batch:</span> <span class="font-mono font-bold text-red-600">{{ selected.batch_number }}</span></p>
+                    <p><span class="text-gray-500">Produk:</span> <span class="font-medium text-gray-900 dark:text-gray-100">{{ selected.produk?.nama_produk }}</span></p>
+                    <p><span class="text-gray-500">Qty Reject:</span> <span class="font-bold text-red-600">{{ form.qty_reject }}</span></p>
+                    <p><span class="text-gray-500">Jenis:</span> <span class="font-medium">{{ jenisLabel }}</span></p>
                 </div>
                 <div class="mt-6 flex justify-end gap-2">
-                    <SecondaryButton
-                        @click="showConfirm = false"
-                        :disabled="isSubmitting"
-                        >Batal</SecondaryButton
-                    >
-                    <DangerButton
-                        @click="confirmSubmit"
-                        :disabled="isSubmitting"
-                        >{{
-                            isSubmitting ? 'Menyimpan...' : 'Simpan Reject'
-                        }}</DangerButton
-                    >
+                    <SecondaryButton @click="showConfirm = false" :disabled="isSubmitting">Batal</SecondaryButton>
+                    <DangerButton @click="confirmSubmit" :disabled="isSubmitting">{{ isSubmitting ? 'Menyimpan...' : 'Simpan Reject' }}</DangerButton>
                 </div>
             </div>
         </Modal>
 
-        <!-- ========================================== -->
-        <!-- MODAL KONFIRMASI HAPUS REJECT              -->
-        <!-- ========================================== -->
-        <Modal
-            :show="showDeleteConfirm"
-            maxWidth="md"
-            @close="showDeleteConfirm = false"
-        >
+        <!-- MODAL KONFIRMASI HAPUS REJECT -->
+        <Modal :show="showDeleteConfirm" maxWidth="md" @close="showDeleteConfirm = false">
             <div class="p-6">
-                <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">
-                    Hapus Item Reject
-                </h2>
-                <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-                    Apakah Anda yakin ingin menghapus catatan reject ini? Sisa
-                    qty produksi akan dikembalikan.
-                </p>
-                <div
-                    v-if="rejectToDelete"
-                    class="mt-4 rounded-md border border-red-200 bg-red-50/50 p-3 text-sm dark:border-red-900/40 dark:bg-red-950/20"
-                >
-                    <p>
-                        <span class="text-gray-500">Jumlah:</span>
-                        <span class="font-bold text-red-600 dark:text-red-400"
-                            >{{ rejectToDelete.jumlah }} pcs</span
-                        >
-                    </p>
-                    <p>
-                        <span class="text-gray-500">Alasan:</span>
-                        <span class="text-gray-800 dark:text-gray-200">{{
-                            rejectToDelete.keterangan || '-'
-                        }}</span>
-                    </p>
+                <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">Hapus Item Reject</h2>
+                <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Apakah Anda yakin ingin menghapus catatan reject ini?</p>
+                <div v-if="rejectToDelete" class="mt-4 rounded-md border border-red-200 bg-red-50/50 p-3 text-sm dark:border-red-900/40 dark:bg-red-950/20">
+                    <p><span class="text-gray-500">Material:</span> <span class="font-bold text-gray-900 dark:text-gray-100">{{ rejectToDelete.material_name || rejectToDelete.keterangan }}</span></p>
+                    <p><span class="text-gray-500">Jumlah:</span> <span class="font-bold text-red-600">{{ rejectToDelete.jumlah }} {{ rejectToDelete.material_uom || 'Pcs' }}</span></p>
                 </div>
                 <div class="mt-6 flex justify-end gap-2">
-                    <SecondaryButton
-                        @click="showDeleteConfirm = false"
-                        :disabled="isDeleting"
-                        >Batal</SecondaryButton
+                    <SecondaryButton @click="showDeleteConfirm = false" :disabled="isDeleting">Batal</SecondaryButton>
+                    <DangerButton @click="confirmDeleteReject" :disabled="isDeleting">{{ isDeleting ? 'Menghapus...' : 'Ya, Hapus Data' }}</DangerButton>
+                </div>
+            </div>
+        </Modal>
+
+        <!-- ============================================================== -->
+        <!-- MODAL RINCIAN URAIAN BAHAN BAKU (FORMULA BoM ODOO)            -->
+        <!-- ============================================================== -->
+        <Modal :show="showRecipeModal" maxWidth="2xl" @close="showRecipeModal = false">
+            <div class="p-6">
+                <div class="flex items-start justify-between gap-3 border-b border-gray-100 pb-4 dark:border-gray-700">
+                    <div class="flex items-center gap-3">
+                        <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300 text-lg shadow-sm">
+                            🧪
+                        </span>
+                        <div>
+                            <h2 class="text-base font-bold text-gray-900 dark:text-gray-100">
+                                Uraian Komposisi Bahan Baku (Formula BoM Odoo)
+                            </h2>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                Rincian takaran bahan baku yang terkandung dalam reject
+                                <strong class="font-bold text-teal-700 dark:text-teal-300">{{ activeRecipeItem?.material_name }}</strong>
+                                ({{ activeRecipeItem?.jumlah?.toLocaleString('id-ID') }} {{ activeRecipeItem?.material_uom || 'Pcs' }})
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        @click="showRecipeModal = false"
+                        class="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                     >
-                    <DangerButton
-                        @click="confirmDeleteReject"
-                        :disabled="isDeleting"
-                        >{{
-                            isDeleting ? 'Menghapus...' : 'Ya, Hapus Data'
-                        }}</DangerButton
-                    >
+                        ✕
+                    </button>
+                </div>
+
+                <!-- Loading State -->
+                <div v-if="recipeLoading" class="py-12 text-center">
+                    <div class="inline-block h-8 w-8 animate-spin rounded-full border-4 border-teal-500 border-t-transparent"></div>
+                    <p class="mt-3 text-xs font-semibold text-gray-600 dark:text-gray-300">
+                        Memuat formula komposisi bahan baku dari Odoo...
+                    </p>
+                </div>
+
+                <!-- Error State -->
+                <div v-else-if="recipeError" class="my-6 rounded-xl border border-red-200 bg-red-50/70 p-4 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+                    <div class="flex items-center gap-2 font-bold mb-1">
+                        <span>⚠️</span>
+                        <span>Informasi Formula</span>
+                    </div>
+                    <p>{{ recipeError }}</p>
+                    <p class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        Item ini dicatat langsung sebagai produk atau kemasan individual di Odoo.
+                    </p>
+                </div>
+
+                <!-- Success State / Breakdown -->
+                <div v-else-if="activeRecipe" class="mt-4 space-y-4">
+                    <!-- Stat Highlights -->
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        <div class="rounded-xl border border-gray-100 bg-gray-50/80 p-3 dark:border-gray-700/60 dark:bg-gray-900/40">
+                            <span class="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase">BoM Ruahan</span>
+                            <span class="text-xs font-bold text-gray-900 dark:text-gray-100">{{ activeRecipe.ruahan_bom_name }}</span>
+                        </div>
+                        <div class="rounded-xl border border-teal-100 bg-teal-50/60 p-3 dark:border-teal-900/40 dark:bg-teal-950/20">
+                            <span class="block text-[10px] font-semibold text-teal-600 dark:text-teal-400 uppercase">Total Ruahan Terbuang</span>
+                            <span class="text-xs font-bold text-teal-700 dark:text-teal-300">
+                                {{ activeRecipe.total_batch_ruahan_kg >= 1 ? `${activeRecipe.total_batch_ruahan_kg.toLocaleString('id-ID')} Kg` : `${activeRecipe.total_batch_ruahan_g.toLocaleString('id-ID')} g` }}
+                            </span>
+                        </div>
+                        <div class="col-span-2 sm:col-span-1 rounded-xl border border-gray-100 bg-gray-50/80 p-3 dark:border-gray-700/60 dark:bg-gray-900/40">
+                            <span class="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Dosis per Kemasan</span>
+                            <span class="text-xs font-bold text-gray-900 dark:text-gray-100">{{ activeRecipe.ruahan_dose_per_unit_g }} g / unit</span>
+                        </div>
+                    </div>
+
+                    <!-- Table Raw Materials -->
+                    <div class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+                        <div class="bg-gray-50 px-3.5 py-2 font-bold text-xs text-gray-700 dark:bg-gray-700/80 dark:text-gray-200 flex items-center justify-between">
+                            <span>🧪 Daftar Bahan Baku (Raw Material) Terbuang</span>
+                            <span class="text-[11px] text-gray-500 dark:text-gray-400 font-normal">
+                                {{ activeRecipe.raw_materials_count }} Bahan Baku
+                            </span>
+                        </div>
+                        <div class="max-h-64 overflow-y-auto">
+                            <table class="min-w-full divide-y divide-gray-200 text-xs dark:divide-gray-700">
+                                <thead class="bg-gray-100/70 dark:bg-gray-800 text-[11px] text-gray-600 dark:text-gray-300">
+                                    <tr>
+                                        <th class="px-3 py-2 text-left font-semibold">Nama Bahan Baku</th>
+                                        <th class="px-3 py-2 text-center font-semibold">Persentase (%)</th>
+                                        <th class="px-3 py-2 text-right font-semibold">Dosis / Botol</th>
+                                        <th class="px-3 py-2 text-right font-semibold">Total Terbuang</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100 dark:divide-gray-700/50">
+                                    <tr
+                                        v-for="(rm, idx) in activeRecipe.raw_materials"
+                                        :key="idx"
+                                        class="hover:bg-teal-50/30 dark:hover:bg-gray-700/30"
+                                    >
+                                        <td class="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
+                                            {{ rm.name }}
+                                        </td>
+                                        <td class="px-3 py-2 text-center text-gray-600 dark:text-gray-300 font-mono">
+                                            {{ rm.percentage }}%
+                                        </td>
+                                        <td class="px-3 py-2 text-right text-gray-600 dark:text-gray-300 font-mono">
+                                            {{ rm.qty_per_unit_g }} g
+                                        </td>
+                                        <td class="px-3 py-2 text-right font-mono font-bold text-teal-700 dark:text-teal-300">
+                                            {{ rm.display_qty }}
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Primer Packaging (if any) -->
+                    <div v-if="activeRecipe.primer_packaging && activeRecipe.primer_packaging.length > 0" class="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+                        <div class="bg-gray-50 px-3.5 py-2 font-bold text-xs text-gray-700 dark:bg-gray-700/80 dark:text-gray-200">
+                            📦 Kemasan Primer Terkait
+                        </div>
+                        <div class="divide-y divide-gray-100 p-2.5 text-xs dark:divide-gray-700">
+                            <div
+                                v-for="(p, idx) in activeRecipe.primer_packaging"
+                                :key="idx"
+                                class="flex items-center justify-between py-1 px-1"
+                            >
+                                <span class="text-gray-800 dark:text-gray-200 font-medium">{{ p.name }}</span>
+                                <span class="font-mono font-bold text-gray-900 dark:text-gray-100">
+                                    {{ p.total_batch_qty }} {{ p.uom }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 flex justify-end">
+                    <SecondaryButton @click="showRecipeModal = false">Tutup</SecondaryButton>
                 </div>
             </div>
         </Modal>

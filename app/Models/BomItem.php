@@ -15,6 +15,8 @@ class BomItem extends Model
         'material_name',
         'quantity',
         'uom_id',
+        'uom_name',
+        'category',
     ];
 
     protected $casts = [

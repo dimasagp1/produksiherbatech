@@ -143,21 +143,68 @@ class InventoryController extends Controller
         );
     }
 
-    public function syncFromOdoo(OdooService $odooService)
+    /**
+     * Preview inventory stock from Odoo (JSON).
+     */
+    public function previewOdoo(OdooService $odooService)
+    {
+        if (! auth()->user()->hasAnyRole(['warehouse_admin', 'superadmin', 'admin', 'ppic', 'manager'])) {
+            abort(403, 'Akses ditolak.');
+        }
+
+        try {
+            $stocks = $odooService->fetchInventoryStocksPreview();
+
+            return response()->json([
+                'success' => true,
+                'data' => $stocks,
+                'count' => count($stocks),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data stok dari Odoo: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function syncFromOdoo(Request $request, OdooService $odooService)
     {
         if (! auth()->user()->hasAnyRole(['warehouse_admin', 'superadmin', 'admin', 'ppic'])) {
             abort(403, 'Akses ditolak.');
         }
 
+        $selectedIds = $request->input('selected_ids');
+        if (is_array($selectedIds) && empty($selectedIds)) {
+            $err = 'Silakan pilih setidaknya satu produk/stok untuk disinkronkan.';
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => $err], 422);
+            }
+
+            return back()->withErrors(['stock' => $err]);
+        }
+
         try {
-            $summary = $odooService->syncInventoryStocks();
+            $summary = $odooService->syncInventoryStocks(is_array($selectedIds) ? $selectedIds : null);
             $msg = "Sync Saldo Stok Odoo selesai: {$summary['created']} dibuat, {$summary['updated']} diperbarui, {$summary['skipped']} dilewati.";
             if (! empty($summary['errors'])) {
                 $msg .= ' Error: '.implode(', ', $summary['errors']);
             }
 
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => $msg,
+                    'summary' => $summary,
+                ]);
+            }
+
             return back()->with('success', $msg);
         } catch (\Exception $e) {
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => 'Gagal sync Saldo Stok Odoo: '.$e->getMessage()], 500);
+            }
+
             return back()->with('error', 'Gagal sync Saldo Stok Odoo: '.$e->getMessage());
         }
     }

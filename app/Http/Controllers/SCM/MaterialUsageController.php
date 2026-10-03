@@ -26,10 +26,25 @@ class MaterialUsageController extends Controller
     {
         $search = $request->input('search', '');
 
-        $usages = MaterialUsage::with(['items.produk', 'items.uom', 'weeklyPlan.produk', 'user'])
+        $usages = MaterialUsage::with([
+            'items.produk.uom',
+            'items.uom',
+            'weeklyPlan.produk.uom',
+            'weeklyPlan.line',
+            'user',
+        ])
             ->when($search, function ($q, $s) {
                 $q->where('usage_number', 'like', "%{$s}%")
-                    ->orWhereHas('weeklyPlan', fn ($qq) => $qq->where('batch_number', 'like', "%{$s}%"));
+                    ->orWhereHas('weeklyPlan', function ($qq) use ($s) {
+                        $qq->where('batch_number', 'like', "%{$s}%")
+                            ->orWhereHas('produk', function ($p) use ($s) {
+                                $p->where('nama_produk', 'like', "%{$s}%")
+                                    ->orWhere('kode_produk', 'like', "%{$s}%");
+                            });
+                    })
+                    ->orWhereHas('items', function ($it) use ($s) {
+                        $it->where('material_name', 'like', "%{$s}%");
+                    });
             })
             ->latest('usage_date')
             ->latest('id')
@@ -47,13 +62,13 @@ class MaterialUsageController extends Controller
 
     public function create()
     {
-        $plans = WeeklyPlan::with(['produk', 'line'])
+        $plans = WeeklyPlan::with(['produk.uom', 'line'])
             ->whereIn('status', ['aktif', 'draft'])
             ->latest('tanggal')
             ->limit(50)
             ->get();
 
-        $boms = Bom::with(['produk', 'items.uom', 'items.materialProduk'])
+        $boms = Bom::with(['produk.uom', 'items.uom', 'items.materialProduk.uom'])
             ->where('is_active', true)
             ->get()
             ->keyBy('produk_id');
@@ -86,7 +101,7 @@ class MaterialUsageController extends Controller
         $validated = $request->validate([
             'weekly_plan_id' => 'required|exists:weekly_plans,id',
             'usage_date' => 'required|date',
-            'shift' => 'nullable|in:shift1,shift2',
+            'shift' => 'nullable|in:shift1,shift2,1,2',
             'notes' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.produk_id' => 'nullable|exists:produks,id',
@@ -158,18 +173,54 @@ class MaterialUsageController extends Controller
             ->with('success', "Material Usage {$usage->usage_number} tersimpan");
     }
 
-    public function show(MaterialUsage $materialUsage)
+    public function show(MaterialUsage $materialUsage, OdooService $odooService)
     {
-        $materialUsage->load(['items.produk', 'items.uom', 'weeklyPlan.produk', 'user']);
+        $materialUsage->load([
+            'items.produk.uom',
+            'items.uom',
+            'weeklyPlan.produk.uom',
+            'weeklyPlan.line',
+            'user',
+        ]);
 
-        $items = $materialUsage->items->map(function ($item) {
+        $parentProdName = $materialUsage->weeklyPlan?->produk?->nama_produk;
+        $targetOutput = (float) ($materialUsage->weeklyPlan?->target_output ?: 1.0);
+
+        $items = $materialUsage->items->map(function ($item) use ($odooService, $parentProdName, $targetOutput) {
             $ratio = $item->quantity_standard > 0
                 ? (($item->quantity_used - $item->quantity_standard) / $item->quantity_standard) * 100
                 : null;
 
+            $itemName = $item->material_name;
+            $breakdown = null;
+            $isPrimerOrRuahan = str_contains(strtolower($itemName), 'primer')
+                || str_contains(strtolower($itemName), 'ruahan')
+                || str_contains(strtolower($itemName), 'bulk')
+                || str_contains(strtolower($itemName), 'wip')
+                || ($item->produk?->item_type === 'wip');
+
+            if ($isPrimerOrRuahan) {
+                try {
+                    $breakdown = $odooService->getMaterialRecipeBreakdown($itemName, $targetOutput, $parentProdName);
+                } catch (\Throwable $e) {
+                    $breakdown = null;
+                }
+            }
+
+            $detectedCat = Bom::detectCategory($itemName, $item->produk?->item_type);
+            $isPm = in_array(strtolower($item->produk?->item_type ?? ''), ['pm', 'bahan_kemas', 'kemas', 'packaging'], true)
+                || $detectedCat === 'primary_packaging'
+                || $detectedCat === 'secondary_packaging';
+
+            $itemType = $isPm ? 'pm' : ($isPrimerOrRuahan ? 'wip' : 'rm');
+
             return [
                 ...$item->toArray(),
+                'item_type' => $itemType,
+                'material_code' => $item->produk?->kode_produk ?? '-',
+                'uom_code' => $item->uom?->code ?? $item->produk?->uom?->code ?? $item->produk?->odoo_uom ?? 'Pcs',
                 'ratio_persen' => $ratio !== null ? round($ratio, 2) : null,
+                'recipe_breakdown' => $breakdown,
             ];
         });
 
@@ -177,16 +228,46 @@ class MaterialUsageController extends Controller
         $totalUsed = $materialUsage->items->sum('quantity_used');
         $totalVariance = $totalUsed - $totalStandard;
         $overallRatio = $totalStandard > 0 ? round(($totalVariance / $totalStandard) * 100, 2) : null;
+        $ratioTarget = (float) Setting::get('material_usage_ratio_target', 0.5);
+
+        // Subtotals by category
+        $rmItems = $items->filter(fn ($it) => in_array($it['item_type'] ?? '', ['rm', 'wip', 'bahan_baku'], true));
+        $pmItems = $items->filter(fn ($it) => in_array($it['item_type'] ?? '', ['pm', 'bahan_kemas'], true));
+
+        $withinTargetCount = $items->filter(function ($it) use ($ratioTarget) {
+            if ($it['ratio_persen'] === null) {
+                return (float) ($it['variance'] ?? 0) <= 0;
+            }
+            $r = abs((float) ($it['ratio_persen'] ?? 0));
+
+            return $r <= $ratioTarget;
+        })->count();
+
+        $complianceRate = $items->count() > 0
+            ? round(($withinTargetCount / $items->count()) * 100, 1)
+            : 100.0;
+
+        $rmEfficientCount = $rmItems->filter(fn ($it) => (float) ($it['variance'] ?? 0) <= 0)->count();
+        $pmEfficientCount = $pmItems->filter(fn ($it) => (float) ($it['variance'] ?? 0) <= 0)->count();
 
         return Inertia::render('SCM/Inventory/MaterialUsage/Show', [
             'usage' => $materialUsage,
             'items' => $items,
             'summary' => [
-                'total_standard' => $totalStandard,
-                'total_used' => $totalUsed,
-                'total_variance' => $totalVariance,
+                'total_items_count' => $items->count(),
+                'rm_count' => $rmItems->count(),
+                'pm_count' => $pmItems->count(),
+                'within_target_count' => $withinTargetCount,
+                'compliance_rate' => $complianceRate,
+                'ratio_target' => $ratioTarget,
+                'rm_efficient_count' => $rmEfficientCount,
+                'pm_efficient_count' => $pmEfficientCount,
+                'rm_used' => round($rmItems->sum('quantity_used'), 4),
+                'pm_used' => round($pmItems->sum('quantity_used'), 4),
+                'total_standard' => round($totalStandard, 4),
+                'total_used' => round($totalUsed, 4),
+                'total_variance' => round($totalVariance, 4),
                 'overall_ratio' => $overallRatio,
-                'ratio_target' => (float) Setting::get('material_usage_ratio_target', 0.5),
             ],
         ]);
     }
@@ -251,14 +332,40 @@ class MaterialUsageController extends Controller
         return back()->with('error', 'Format export tidak dikenal');
     }
 
-    public function syncFromOdoo(OdooService $odooService)
+    /**
+     * Preview Material Usages from Odoo for interactive selection modal.
+     */
+    public function previewOdoo(OdooService $odooService)
     {
         if (! auth()->user()->hasAnyRole(['warehouse_admin', 'superadmin', 'admin', 'ppic', 'leader', 'spv'])) {
             abort(403, 'Akses ditolak.');
         }
 
         try {
-            $summary = $odooService->syncMaterialUsages();
+            $data = $odooService->fetchMaterialUsagesPreview();
+
+            return response()->json([
+                'success' => true,
+                'data' => $data,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil preview Material Usage dari Odoo: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function syncFromOdoo(Request $request, OdooService $odooService)
+    {
+        if (! auth()->user()->hasAnyRole(['warehouse_admin', 'superadmin', 'admin', 'ppic', 'leader', 'spv'])) {
+            abort(403, 'Akses ditolak.');
+        }
+
+        $selectedIds = $request->input('selected_ids') ?? $request->input('selected_mo_ids');
+
+        try {
+            $summary = $odooService->syncMaterialUsages($selectedIds);
             $msg = "Sync Material Usage Odoo selesai: {$summary['created']} dibuat, {$summary['updated']} diperbarui, {$summary['skipped']} dilewati.";
             if (! empty($summary['errors'])) {
                 $msg .= ' Error: '.implode(', ', $summary['errors']);

@@ -11,8 +11,12 @@ class RejectDetail extends Model
 
     protected $fillable = [
         'odoo_scrap_id',
+        'odoo_mo_id',
+        'odoo_mo_name',
         'laporan_harian_id',
         'jenis_reject',
+        'material_name',
+        'material_uom',
         'jumlah',
         'keterangan',
         'created_by',
@@ -20,7 +24,7 @@ class RejectDetail extends Model
     ];
 
     protected $casts = [
-        'jumlah' => 'integer',
+        'jumlah' => 'float',
         'odoo_synced_at' => 'datetime',
     ];
 

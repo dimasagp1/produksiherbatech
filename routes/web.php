@@ -96,7 +96,9 @@ Route::middleware(['auth', 'role:ppic|superadmin'])->prefix('ppic')->name('ppic.
 Route::middleware(['auth', 'role:ppic|superadmin|admin|warehouse_admin|manager'])->prefix('scm')->name('scm.')->group(function () {
     Route::get('/bom', [BomController::class, 'index'])->name('bom.index');
     Route::post('/bom', [BomController::class, 'store'])->name('bom.store');
+    Route::get('/bom/preview-odoo', [BomController::class, 'previewOdoo'])->name('bom.preview-odoo');
     Route::post('/bom/sync-odoo', [BomController::class, 'syncFromOdoo'])->name('bom.sync-odoo');
+    Route::get('/bom/{bom}/breakdown', [BomController::class, 'breakdown'])->name('bom.breakdown');
     Route::put('/bom/{bom}', [BomController::class, 'update'])->name('bom.update');
     Route::delete('/bom/{bom}', [BomController::class, 'destroy'])->name('bom.destroy');
 });
@@ -107,6 +109,7 @@ Route::middleware(['auth', 'role:operator|warehouse_admin|manager|superadmin|adm
     Route::get('/material-usage/create', [MaterialUsageController::class, 'create'])->name('material-usage.create');
     Route::get('/material-usage/export/{format}', [MaterialUsageController::class, 'export'])->name('material-usage.export');
     Route::post('/material-usage', [MaterialUsageController::class, 'store'])->name('material-usage.store');
+    Route::get('/material-usage/preview-odoo', [MaterialUsageController::class, 'previewOdoo'])->name('material-usage.preview-odoo');
     Route::post('/material-usage/sync-odoo', [MaterialUsageController::class, 'syncFromOdoo'])->name('material-usage.sync-odoo');
     Route::get('/material-usage/{materialUsage}', [MaterialUsageController::class, 'show'])->name('material-usage.show');
 
@@ -121,6 +124,7 @@ Route::middleware(['auth', 'role:operator|warehouse_admin|manager|superadmin|adm
 Route::middleware(['auth', 'role:warehouse_admin|manager|superadmin|admin|ppic'])->prefix('scm')->name('scm.')->group(function () {
     Route::get('/saldo-stok', [InventoryController::class, 'index'])->name('saldo-stok.index');
     Route::post('/saldo-stok/adjust', [InventoryController::class, 'adjust'])->name('saldo-stok.adjust');
+    Route::get('/saldo-stok/preview-odoo', [InventoryController::class, 'previewOdoo'])->name('saldo-stok.preview-odoo');
     Route::post('/saldo-stok/sync-odoo', [InventoryController::class, 'syncFromOdoo'])->name('saldo-stok.sync-odoo');
     Route::get('/materials', [InventoryController::class, 'materials'])->name('materials');
 });
@@ -163,6 +167,7 @@ Route::middleware(['auth', 'role:leader|operator|spv|superadmin|admin|manager'])
     Route::get('/', [RejectController::class, 'index'])->name('index');
     Route::post('/', [RejectController::class, 'store'])->name('store');
     Route::post('/sync-odoo', [RejectController::class, 'syncFromOdoo'])->name('sync-odoo');
+    Route::get('/recipe-breakdown', [RejectController::class, 'recipeBreakdown'])->name('recipe-breakdown');
     Route::delete('/{rejectDetail}', [RejectController::class, 'destroy'])->name('destroy');
 });
 

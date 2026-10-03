@@ -389,8 +389,9 @@ class LaporanHarianController extends Controller
                 ? $laporanHarian->pause_started_at
                 : Carbon::parse($laporanHarian->pause_started_at);
             // PRD V §6.2: real elapsed time — TIDAK ADA cap hardcode
-            $pauseDuration = (int) $pauseStartedAt->diffInMinutes(now());
-            $totalPauseMenit = ($laporanHarian->total_pause_menit ?? 0) + $pauseDuration;
+            $pauseDurationSec = max(0, $pauseStartedAt->diffInSeconds(now()));
+            $pauseDuration = round($pauseDurationSec / 60, 2);
+            $totalPauseMenit = round(($laporanHarian->total_pause_menit ?? 0) + $pauseDuration, 2);
 
             $laporanHarian->update([
                 'timer_status' => 'start',
@@ -471,7 +472,7 @@ class LaporanHarianController extends Controller
         }
         $grossTimeMenit = $endMinutes - $startMinutes;
 
-        $totalPauseMenit = $laporanHarian->total_pause_menit ?? 0;
+        $totalPauseMenit = (float) ($laporanHarian->total_pause_menit ?? 0);
         if ($laporanHarian->timer_status === 'pause' && $laporanHarian->pause_started_at) {
             $request->validate([
                 'alasan_downtime' => 'required|string|min:3',
@@ -480,8 +481,9 @@ class LaporanHarianController extends Controller
             $pauseStartedAt = $laporanHarian->pause_started_at instanceof Carbon
                 ? $laporanHarian->pause_started_at
                 : Carbon::parse($laporanHarian->pause_started_at);
-            $pauseDuration = max(0, (int) $pauseStartedAt->diffInMinutes(now()));
-            $totalPauseMenit += $pauseDuration;
+            $pauseDurationSec = max(0, $pauseStartedAt->diffInSeconds(now()));
+            $pauseDuration = round($pauseDurationSec / 60, 2);
+            $totalPauseMenit = round($totalPauseMenit + $pauseDuration, 2);
 
             // Simpan downtime detail (pause = downtime)
             $laporanHarian->downtimeDetails()->create([

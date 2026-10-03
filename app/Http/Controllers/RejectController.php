@@ -102,9 +102,15 @@ class RejectController extends Controller
             return $item;
         });
 
-        // 2. Daftar Detail Item Reject (untuk pencarian / history)
+        // 2. Daftar Detail Item Reject (Rincian per Komponen / Material)
         $rejectDetailsQuery = RejectDetail::with(['laporanHarian.produk', 'laporanHarian.line', 'laporanHarian.mesin', 'creator'])
             ->latest();
+
+        if ($filter === 'odoo') {
+            $rejectDetailsQuery->whereNotNull('odoo_scrap_id');
+        } elseif (in_array($filter, ['ga', 'sublayer', 'process'], true)) {
+            $rejectDetailsQuery->where('jenis_reject', $filter);
+        }
 
         if (! empty($month)) {
             $parts = explode('-', $month);
@@ -124,7 +130,9 @@ class RejectController extends Controller
 
         if ($search) {
             $rejectDetailsQuery->where(function ($q) use ($search) {
-                $q->where('keterangan', 'like', "%{$search}%")
+                $q->where('material_name', 'like', "%{$search}%")
+                    ->orWhere('odoo_mo_name', 'like', "%{$search}%")
+                    ->orWhere('keterangan', 'like', "%{$search}%")
                     ->orWhere('jenis_reject', 'like', "%{$search}%")
                     ->orWhere('odoo_scrap_id', 'like', "%{$search}%")
                     ->orWhereHas('laporanHarian', function ($qq) use ($search) {
@@ -146,7 +154,12 @@ class RejectController extends Controller
             ->get();
 
         // 4. Ringkasan Statistik Filtered
-        $totalFilteredReject = (int) (clone $rejectDetailsQuery)->sum('jumlah');
+        $statsQuery = clone $rejectDetailsQuery;
+        $totalFilteredReject = (float) $statsQuery->sum('jumlah');
+        $totalRejectGa = (float) (clone $statsQuery)->where('jenis_reject', 'ga')->sum('jumlah');
+        $totalRejectSup = (float) (clone $statsQuery)->where('jenis_reject', 'sublayer')->sum('jumlah');
+        $totalRejectLoss = (float) (clone $statsQuery)->where('jenis_reject', 'process')->sum('jumlah');
+        $totalRecords = (int) (clone $statsQuery)->count();
 
         return Inertia::render('Reject/Index', [
             'productions' => $productions,
@@ -161,6 +174,10 @@ class RejectController extends Controller
             'sort_by' => $sortBy,
             'stats' => [
                 'total_reject_pcs' => $totalFilteredReject,
+                'total_reject_ga' => $totalRejectGa,
+                'total_reject_sup' => $totalRejectSup,
+                'total_reject_loss' => $totalRejectLoss,
+                'total_records' => $totalRecords,
             ],
         ]);
     }
@@ -182,7 +199,7 @@ class RejectController extends Controller
                     $fail('Alasan reject wajib diisi.');
                 }
             }],
-            'qty_reject' => 'required|integer|min:1',
+            'qty_reject' => 'required|numeric|min:1',
             'jenis_reject' => 'required|in:sublayer,ga,process',
         ], [
             'alasan_reject.required' => 'Alasan reject wajib diisi.',
@@ -191,7 +208,7 @@ class RejectController extends Controller
             'jenis_reject.required' => 'Jenis reject wajib dipilih.',
         ]);
 
-        $laporan = LaporanHarian::with(['produk', 'rejectDetails'])->findOrFail($validated['laporan_harian_id']);
+        $laporan = LaporanHarian::with(['produk', 'weeklyPlan', 'rejectDetails'])->findOrFail($validated['laporan_harian_id']);
 
         if ($laporan->status === 'locked') {
             return back()->withErrors(['laporan_harian_id' => 'Data produksi yang sudah dikunci tidak dapat direject.']);
@@ -202,7 +219,7 @@ class RejectController extends Controller
             return back()->withErrors(['qty_reject' => 'Quantity produk tidak tersedia atau belum diisi.']);
         }
 
-        $totalExisting = (int) $laporan->rejectDetails()->sum('jumlah');
+        $totalExisting = (float) $laporan->rejectDetails()->sum('jumlah');
         $sisa = $availableQty - $totalExisting;
 
         if ($sisa <= 0) {
@@ -220,6 +237,10 @@ class RejectController extends Controller
             DB::transaction(function () use ($laporan, $jenisToStore, $validated, $alasan, $user) {
                 RejectDetail::create([
                     'laporan_harian_id' => $laporan->id,
+                    'material_name' => $laporan->produk?->nama_produk ?? 'Produk Jadi',
+                    'material_uom' => $laporan->produk?->odoo_uom ?: 'Pcs',
+                    'odoo_mo_name' => $laporan->weeklyPlan?->odoo_mo_id ? 'MO #'.$laporan->weeklyPlan->odoo_mo_id : null,
+                    'odoo_mo_id' => $laporan->weeklyPlan?->odoo_mo_id,
                     'jenis_reject' => $jenisToStore,
                     'jumlah' => $validated['qty_reject'],
                     'keterangan' => $alasan,
@@ -255,6 +276,40 @@ class RejectController extends Controller
         $rejectDetail->delete();
 
         return back()->with('success', 'Data reject berhasil dihapus.');
+    }
+
+    /**
+     * Ambil rincian formula / uraian bahan baku untuk reject produk jadi / ruahan.
+     */
+    public function recipeBreakdown(Request $request, OdooService $odooService)
+    {
+        $materialName = (string) $request->input('material_name', '');
+        $qty = (float) $request->input('qty', 1);
+        $parentProductName = $request->input('parent_product_name');
+
+        if (empty($materialName)) {
+            return response()->json(['success' => false, 'message' => 'Material name is required.'], 422);
+        }
+
+        try {
+            $breakdown = $odooService->getMaterialRecipeBreakdown($materialName, max(1, $qty), $parentProductName);
+            if (! $breakdown) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Formula / BoM untuk '{$materialName}' tidak ditemukan di Odoo.",
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $breakdown,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data formula: '.$e->getMessage(),
+            ], 500);
+        }
     }
 
     /**

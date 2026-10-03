@@ -133,21 +133,86 @@ class BomController extends Controller
         return redirect()->route('scm.bom.index')->with('success', 'BOM berhasil dihapus');
     }
 
-    public function syncFromOdoo(OdooService $odooService)
+    /**
+     * Get exploded breakdown of composition and packaging for 1 pcs (or specified quantity).
+     */
+    public function breakdown(Request $request, Bom $bom)
+    {
+        $quantity = (float) $request->input('quantity', 1.0);
+        if ($quantity <= 0) {
+            $quantity = 1.0;
+        }
+
+        $breakdown = $bom->getBreakdown($quantity);
+
+        return response()->json([
+            'success' => true,
+            'data' => $breakdown,
+        ]);
+    }
+
+    /**
+     * Preview BOM list from Odoo before syncing (JSON).
+     */
+    public function previewOdoo(OdooService $odooService)
+    {
+        if (! auth()->user()->hasAnyRole(['warehouse_admin', 'superadmin', 'admin', 'ppic', 'spv', 'manager'])) {
+            abort(403, 'Akses ditolak.');
+        }
+
+        try {
+            $boms = $odooService->fetchBomsPreview();
+
+            return response()->json([
+                'success' => true,
+                'data' => $boms,
+                'count' => count($boms),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data BOM dari Odoo: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function syncFromOdoo(Request $request, OdooService $odooService)
     {
         if (! auth()->user()->hasAnyRole(['warehouse_admin', 'superadmin', 'admin', 'ppic', 'spv'])) {
             abort(403, 'Akses ditolak.');
         }
 
+        $selectedIds = $request->input('selected_ids');
+        if (is_array($selectedIds) && empty($selectedIds)) {
+            $err = 'Silakan pilih setidaknya satu BOM untuk disinkronkan.';
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => $err], 422);
+            }
+
+            return back()->withErrors(['bom' => $err]);
+        }
+
         try {
-            $summary = $odooService->syncBoms();
+            $summary = $odooService->syncBoms(is_array($selectedIds) ? $selectedIds : null);
             $msg = "Sync BOM Odoo selesai: {$summary['created']} dibuat, {$summary['updated']} diperbarui, {$summary['skipped']} dilewati.";
             if (! empty($summary['errors'])) {
                 $msg .= ' Error: '.implode(', ', $summary['errors']);
             }
 
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => $msg,
+                    'summary' => $summary,
+                ]);
+            }
+
             return back()->with('success', $msg);
         } catch (\Exception $e) {
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => 'Gagal sync BOM Odoo: '.$e->getMessage()], 500);
+            }
+
             return back()->with('error', 'Gagal sync BOM Odoo: '.$e->getMessage());
         }
     }

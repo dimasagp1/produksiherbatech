@@ -30,9 +30,11 @@ interface AlasanDowntime {
 }
 interface DowntimeDetail {
     id: number;
-    alasan_downtime_id: number;
+    alasan_downtime_id?: number | null;
     durasi_menit: number;
-    alasanDowntime: AlasanDowntime;
+    keterangan?: string;
+    created_at?: string;
+    alasanDowntime?: AlasanDowntime;
 }
 
 const props = defineProps<{
@@ -165,6 +167,30 @@ function kpiColor(v: number): string {
     if (v >= 85) return 'text-green-600 dark:text-green-400';
     if (v >= 65) return 'text-yellow-600 dark:text-yellow-400';
     return 'text-red-600 dark:text-red-400';
+}
+
+function formatTime(dateStr?: string): string {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '-';
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    const s = String(d.getSeconds()).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+}
+
+function formatDuration(minutes: number | null | undefined): string {
+    if (minutes === null || minutes === undefined || Number(minutes) <= 0) return '0 dtk';
+    const totalSeconds = Math.round(Number(minutes) * 60);
+    if (totalSeconds < 60) {
+        return `${totalSeconds} dtk`;
+    }
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    if (s === 0) {
+        return `${m} mnt`;
+    }
+    return `${m} mnt ${s} dtk`;
 }
 
 function submit() {
@@ -408,6 +434,154 @@ function submit() {
                                         required
                                     />
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- Riwayat Downtime & Jeda Produksi -->
+                        <div
+                            class="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800"
+                        >
+                            <div
+                                class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                                <div class="flex items-center gap-2">
+                                    <h3
+                                        class="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400"
+                                    >
+                                        Riwayat Downtime & Jeda
+                                    </h3>
+                                    <span
+                                        v-if="
+                                            downtimeDetails &&
+                                            downtimeDetails.length > 0
+                                        "
+                                        class="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                                    >
+                                        {{ downtimeDetails.length }} Sesi Jeda
+                                    </span>
+                                </div>
+                                <span
+                                    v-if="laporan.total_pause_menit > 0"
+                                    class="text-xs font-medium text-gray-600 dark:text-gray-300"
+                                >
+                                    Total Akumulasi Jeda:
+                                    <strong
+                                        class="text-amber-600 dark:text-amber-400"
+                                    >
+                                        {{
+                                            formatDuration(
+                                                laporan.total_pause_menit,
+                                            )
+                                        }}
+                                    </strong>
+                                </span>
+                            </div>
+
+                            <div
+                                v-if="
+                                    downtimeDetails &&
+                                    downtimeDetails.length > 0
+                                "
+                                class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700"
+                            >
+                                <table
+                                    class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-700"
+                                >
+                                    <thead
+                                        class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-gray-700/50 dark:text-gray-400"
+                                    >
+                                        <tr>
+                                            <th
+                                                class="px-4 py-2.5 text-left font-medium"
+                                            >
+                                                Sesi
+                                            </th>
+                                            <th
+                                                class="px-4 py-2.5 text-left font-medium"
+                                            >
+                                                Jam Tercatat
+                                            </th>
+                                            <th
+                                                class="px-4 py-2.5 text-left font-medium"
+                                            >
+                                                Durasi Jeda
+                                            </th>
+                                            <th
+                                                class="px-4 py-2.5 text-left font-medium"
+                                            >
+                                                Alasan / Keterangan Downtime
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody
+                                        class="divide-y divide-gray-100 bg-white dark:divide-gray-700 dark:bg-gray-800"
+                                    >
+                                        <tr
+                                            v-for="(dt, idx) in downtimeDetails"
+                                            :key="dt.id || idx"
+                                            class="transition hover:bg-gray-50 dark:hover:bg-gray-700/30"
+                                        >
+                                            <td
+                                                class="whitespace-nowrap px-4 py-3 font-semibold text-gray-900 dark:text-gray-100"
+                                            >
+                                                #{{ idx + 1 }}
+                                            </td>
+                                            <td
+                                                class="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-300"
+                                            >
+                                                {{ formatTime(dt.created_at) }}
+                                            </td>
+                                            <td
+                                                class="whitespace-nowrap px-4 py-3 font-semibold text-amber-600 dark:text-amber-400"
+                                            >
+                                                {{
+                                                    formatDuration(
+                                                        dt.durasi_menit,
+                                                    )
+                                                }}
+                                            </td>
+                                            <td
+                                                class="px-4 py-3 text-gray-700 dark:text-gray-200"
+                                            >
+                                                <div class="flex flex-col">
+                                                    <span
+                                                        v-if="
+                                                            dt.alasanDowntime
+                                                                ?.nama_alasan
+                                                        "
+                                                        class="text-xs font-medium text-indigo-600 dark:text-indigo-400"
+                                                    >
+                                                        {{
+                                                            dt.alasanDowntime
+                                                                .nama_alasan
+                                                        }}
+                                                    </span>
+                                                    <span
+                                                        class="font-medium text-gray-800 dark:text-gray-100"
+                                                    >
+                                                        {{
+                                                            dt.keterangan ||
+                                                            dt.alasanDowntime
+                                                                ?.nama_alasan ||
+                                                            '-'
+                                                        }}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div
+                                v-else
+                                class="rounded-lg border border-dashed border-gray-200 p-6 text-center dark:border-gray-700"
+                            >
+                                <p
+                                    class="text-xs font-medium text-gray-500 dark:text-gray-400"
+                                >
+                                    Belum ada riwayat downtime/jeda pada laporan
+                                    ini.
+                                </p>
                             </div>
                         </div>
                     </div>

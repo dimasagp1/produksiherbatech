@@ -17,7 +17,7 @@ class DowntimeDetail extends Model
     ];
 
     protected $casts = [
-        'durasi_menit' => 'integer',
+        'durasi_menit' => 'float',
     ];
 
     public function laporanHarian()

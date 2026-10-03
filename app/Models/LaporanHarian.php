@@ -64,7 +64,7 @@ class LaporanHarian extends Model
         'timer_status' => 'string',
         'pause_started_at' => 'datetime',
         'start_time_at' => 'datetime',
-        'total_pause_menit' => 'integer',
+        'total_pause_menit' => 'float',
     ];
 
     public function user()

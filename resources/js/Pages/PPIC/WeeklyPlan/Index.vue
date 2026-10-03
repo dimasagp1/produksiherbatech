@@ -12,6 +12,7 @@ import { computed, ref, watch } from 'vue';
 import Board from './Board.vue';
 import { type BoardPlan } from './components/BatchCard.vue';
 import MoSyncButton from './components/MoSyncButton.vue';
+import OdooMoSyncModal from '@/Components/OdooMoSyncModal.vue';
 
 interface Produk {
     id: number;
@@ -66,6 +67,7 @@ const flash = computed(() => (usePage().props as any).flash ?? {});
 const multiplier = computed(() => props.targetOutputMultiplier ?? 2000);
 const activeTab = ref<'board' | 'table'>('board');
 const syncing = ref(false);
+const showMoSyncModal = ref(false);
 
 const showCreate = ref(false);
 const editItem = ref<WeeklyPlan | null>(null);
@@ -175,7 +177,7 @@ const odooBatchesByProduct = computed(() => {
         if (!map[plan.produk_id]) {
             map[plan.produk_id] = [];
         }
-        if (!map[plan.produk_id].some((b) => b.batch_number === plan.batch_number)) {
+        if (!map[plan.produk_id].some((b) => b.batch_number === plan.batch_number && (b.proses || '') === (plan.proses || ''))) {
             map[plan.produk_id].push({
                 batch_number: plan.batch_number,
                 odoo_mo_id: plan.odoo_mo_id,
@@ -338,8 +340,12 @@ function onProductChange() {
 
     const batches = odooBatchesByProduct.value[pId] ?? [];
     if (batches.length > 0) {
-        // Auto select the first batch from Odoo (preferring draft batch)
-        const chosen = batches.find((b) => b.status === 'draft') || batches[0];
+        // Auto select the first batch from Odoo matching process or draft
+        const chosen =
+            batches.find((b) => b.status === 'draft' && b.proses === createForm.proses) ||
+            batches.find((b) => b.status === 'draft') ||
+            batches.find((b) => b.proses === createForm.proses) ||
+            batches[0];
         selectCreateBatch(chosen);
     } else if (selectedProd) {
         // Fallback auto-format batch number
@@ -444,16 +450,11 @@ function toggleHold(plan: { id: number; packing_hold?: boolean }) {
 }
 
 function syncOdooMo() {
-    syncing.value = true;
-    router.post(
-        route('ppic.odoo.mo-sync'),
-        {},
-        {
-            onFinish: () => {
-                syncing.value = false;
-            },
-        },
-    );
+    showMoSyncModal.value = true;
+}
+
+function handleMoSynced() {
+    router.reload();
 }
 
 function targetPreview(
@@ -1173,10 +1174,10 @@ const moColor: Record<string, string> = {
                     <datalist id="odoo-create-batch-list">
                         <option
                             v-for="b in currentCreateProductBatches"
-                            :key="b.batch_number"
+                            :key="`${b.batch_number}-${b.proses}-${b.odoo_mo_id}`"
                             :value="b.batch_number"
                         >
-                            {{ b.odoo_mo_id ? `MO #${b.odoo_mo_id} (${b.mo_status ?? 'draft'})` : '' }}
+                            {{ b.proses ? `[${b.proses.toUpperCase()}] ` : '' }}{{ b.odoo_mo_id ? `MO #${b.odoo_mo_id} (${b.mo_status ?? 'draft'})` : '' }}
                         </option>
                     </datalist>
 
@@ -1192,23 +1193,42 @@ const moColor: Record<string, string> = {
                                 </svg>
                                 Pilih Batch Bawaan Odoo:
                             </span>
-                            <span class="text-[10px] text-gray-500">Klik batch untuk mengisi</span>
+                            <span class="text-[10px] text-gray-500">Klik batch untuk mengisi & atur proses</span>
                         </div>
-                        <div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+                        <div class="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto pr-0.5">
                             <button
                                 v-for="b in currentCreateProductBatches"
-                                :key="b.batch_number"
+                                :key="`${b.batch_number}-${b.proses}-${b.odoo_mo_id}`"
                                 type="button"
-                                class="rounded px-2 py-1 font-mono text-[11px] transition"
+                                class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium transition shadow-xs"
                                 :class="
-                                    createForm.batch_number === b.batch_number
-                                        ? 'bg-indigo-600 font-bold text-white shadow-sm'
-                                        : 'border border-gray-200 bg-white text-gray-700 hover:bg-indigo-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-indigo-950/60'
+                                    createForm.batch_number === b.batch_number && (createForm.proses === b.proses || !b.proses)
+                                        ? 'bg-indigo-600 font-bold text-white shadow-sm ring-1 ring-indigo-500'
+                                        : 'border border-gray-200 bg-white text-gray-700 hover:border-indigo-300 hover:bg-indigo-50/50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60'
                                 "
                                 @click="selectCreateBatch(b)"
                             >
-                                {{ b.batch_number }}
-                                <span v-if="b.odoo_mo_id" class="font-sans text-[9px] opacity-75">
+                                <span class="font-mono font-bold">{{ b.batch_number }}</span>
+                                <span
+                                    v-if="b.proses"
+                                    class="rounded px-1.5 py-0.2 text-[9px] font-extrabold uppercase tracking-wide"
+                                    :class="
+                                        createForm.batch_number === b.batch_number && (createForm.proses === b.proses || !b.proses)
+                                            ? 'bg-white/20 text-white'
+                                            : b.proses === 'mixing'
+                                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+                                            : b.proses === 'filling'
+                                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+                                            : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-200'
+                                    "
+                                >
+                                    {{ b.proses }}
+                                </span>
+                                <span
+                                    v-if="b.odoo_mo_id"
+                                    class="font-sans text-[9px] opacity-75"
+                                    :class="createForm.batch_number === b.batch_number && (createForm.proses === b.proses || !b.proses) ? 'text-indigo-100' : 'text-gray-400 dark:text-gray-500'"
+                                >
                                     (MO #{{ b.odoo_mo_id }})
                                 </span>
                             </button>
@@ -1414,10 +1434,10 @@ const moColor: Record<string, string> = {
                     <datalist v-if="editItem.status === 'draft'" id="odoo-edit-batch-list">
                         <option
                             v-for="b in currentEditProductBatches"
-                            :key="b.batch_number"
+                            :key="`${b.batch_number}-${b.proses}-${b.odoo_mo_id}`"
                             :value="b.batch_number"
                         >
-                            {{ b.odoo_mo_id ? `MO #${b.odoo_mo_id}` : '' }}
+                            {{ b.proses ? `[${b.proses.toUpperCase()}] ` : '' }}{{ b.odoo_mo_id ? `MO #${b.odoo_mo_id}` : '' }}
                         </option>
                     </datalist>
 
@@ -1430,23 +1450,42 @@ const moColor: Record<string, string> = {
                             <span class="font-semibold text-indigo-900 dark:text-indigo-300">
                                 Pilih Batch Odoo:
                             </span>
-                            <span class="text-[10px] text-gray-500">Klik untuk ganti batch</span>
+                            <span class="text-[10px] text-gray-500">Klik untuk ganti batch & proses</span>
                         </div>
-                        <div class="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+                        <div class="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto pr-0.5">
                             <button
                                 v-for="b in currentEditProductBatches"
-                                :key="b.batch_number"
+                                :key="`${b.batch_number}-${b.proses}-${b.odoo_mo_id}`"
                                 type="button"
-                                class="rounded px-2 py-1 font-mono text-[11px] transition"
+                                class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium transition shadow-xs"
                                 :class="
-                                    editForm.batch_number === b.batch_number
-                                        ? 'bg-indigo-600 font-bold text-white shadow-sm'
-                                        : 'border border-gray-200 bg-white text-gray-700 hover:bg-indigo-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-indigo-950/60'
+                                    editForm.batch_number === b.batch_number && (editForm.proses === b.proses || !b.proses)
+                                        ? 'bg-indigo-600 font-bold text-white shadow-sm ring-1 ring-indigo-500'
+                                        : 'border border-gray-200 bg-white text-gray-700 hover:border-indigo-300 hover:bg-indigo-50/50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60'
                                 "
                                 @click="selectEditBatch(b)"
                             >
-                                {{ b.batch_number }}
-                                <span v-if="b.odoo_mo_id" class="font-sans text-[9px] opacity-75">
+                                <span class="font-mono font-bold">{{ b.batch_number }}</span>
+                                <span
+                                    v-if="b.proses"
+                                    class="rounded px-1.5 py-0.2 text-[9px] font-extrabold uppercase tracking-wide"
+                                    :class="
+                                        editForm.batch_number === b.batch_number && (editForm.proses === b.proses || !b.proses)
+                                            ? 'bg-white/20 text-white'
+                                            : b.proses === 'mixing'
+                                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+                                            : b.proses === 'filling'
+                                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+                                            : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-200'
+                                    "
+                                >
+                                    {{ b.proses }}
+                                </span>
+                                <span
+                                    v-if="b.odoo_mo_id"
+                                    class="font-sans text-[9px] opacity-75"
+                                    :class="editForm.batch_number === b.batch_number && (editForm.proses === b.proses || !b.proses) ? 'text-indigo-100' : 'text-gray-400 dark:text-gray-500'"
+                                >
                                     (MO #{{ b.odoo_mo_id }})
                                 </span>
                             </button>
@@ -1531,5 +1570,12 @@ const moColor: Record<string, string> = {
                 </div>
             </div>
         </Modal>
+
+        <!-- Odoo MO Preview & Selective Sync Modal -->
+        <OdooMoSyncModal
+            :show="showMoSyncModal"
+            @close="showMoSyncModal = false"
+            @synced="handleMoSynced"
+        />
     </AuthenticatedLayout>
 </template>

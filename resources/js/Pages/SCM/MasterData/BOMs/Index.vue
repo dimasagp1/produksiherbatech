@@ -11,12 +11,15 @@ import TextInput from '@/Components/TextInput.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import OdooBomSyncModal from '@/Components/OdooBomSyncModal.vue';
+import BomBreakdownModal from '@/Components/BomBreakdownModal.vue';
 
 interface Produk {
     id: number;
     kode_produk: string;
     nama_produk: string;
     item_type?: string;
+    odoo_uom?: string;
 }
 interface Uom {
     id: number;
@@ -30,11 +33,17 @@ interface BomItem {
     quantity: number;
     uom_id?: number | null;
     uom?: Uom | null;
+    uom_name?: string | null;
+    category?: string | null;
 }
 interface Bom {
     id: number;
     produk_id?: number;
+    odoo_bom_id?: number | null;
     version: string;
+    base_qty?: number;
+    uom_id?: number | null;
+    uom?: Uom | null;
     is_active: boolean;
     notes?: string | null;
     produk?: Produk;
@@ -60,6 +69,14 @@ const search = ref(props.search);
 const showForm = ref(false);
 const editItem = ref<Bom | null>(null);
 const deleteId = ref<number | null>(null);
+
+const selectedBreakdownBomId = ref<number | null>(null);
+const showBreakdownModal = ref(false);
+
+function openBreakdown(bom: Bom) {
+    selectedBreakdownBomId.value = bom.id;
+    showBreakdownModal.value = true;
+}
 
 const form = useForm({
     produk_id: '',
@@ -149,18 +166,14 @@ function destroy(id: number) {
 }
 
 const syncing = ref(false);
+const showBomSyncModal = ref(false);
 
 function syncBoms() {
-    syncing.value = true;
-    router.post(
-        route('scm.bom.sync-odoo'),
-        {},
-        {
-            onFinish: () => {
-                syncing.value = false;
-            },
-        },
-    );
+    showBomSyncModal.value = true;
+}
+
+function handleBomSynced() {
+    router.reload();
 }
 
 function goToPage(page: number) {
@@ -238,31 +251,21 @@ function goToPage(page: number) {
                 class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800"
             >
                 <table class="w-full text-xs">
-                    <thead class="bg-gray-50 dark:bg-gray-700/60">
+                    <thead class="bg-gray-50 font-semibold text-gray-600 dark:bg-gray-700/60 dark:text-gray-300">
                         <tr>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
+                            <th class="px-4 py-3 text-left">
                                 Produk
                             </th>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                Versi
+                            <th class="px-3 py-3 text-left">
+                                Versi & Base Qty
                             </th>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                Items
+                            <th class="px-3 py-3 text-left">
+                                Komponen Material
                             </th>
-                            <th
-                                class="px-3 py-2 text-center font-semibold text-gray-500"
-                            >
+                            <th class="px-3 py-3 text-center">
                                 Status
                             </th>
-                            <th
-                                class="px-3 py-2 text-right font-semibold text-gray-500"
-                            >
+                            <th class="px-4 py-3 text-right">
                                 Aksi
                             </th>
                         </tr>
@@ -270,56 +273,89 @@ function goToPage(page: number) {
                     <tbody
                         class="divide-y divide-gray-100 dark:divide-gray-700"
                     >
-                        <tr v-for="bom in boms.data" :key="bom.id">
-                            <td
-                                class="px-3 py-2 font-medium text-gray-900 dark:text-gray-100"
-                            >
-                                {{ bom.produk?.nama_produk ?? '-' }}
-                            </td>
-                            <td class="px-3 py-2 font-mono">
-                                v{{ bom.version }}
-                            </td>
-                            <td class="px-3 py-2">
-                                <div class="space-y-0.5">
-                                    <div
-                                        v-for="it in bom.items"
-                                        :key="it.id"
-                                        class="text-gray-600 dark:text-gray-300"
-                                    >
-                                        {{ it.material_name }} —
-                                        <span class="font-mono">{{
-                                            it.quantity
-                                        }}</span>
-                                        {{ it.uom?.code ?? '' }}
+                        <tr v-for="bom in boms.data" :key="bom.id" class="hover:bg-gray-50/70 dark:hover:bg-gray-750/50">
+                            <td class="px-4 py-3">
+                                <div class="flex flex-col">
+                                    <span class="font-bold text-gray-900 dark:text-gray-100">
+                                        {{ bom.produk?.nama_produk ?? '-' }}
+                                    </span>
+                                    <div class="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                                        <span class="font-mono">{{ bom.produk?.kode_produk ?? '-' }}</span>
+                                        <span>•</span>
+                                        <span class="uppercase font-semibold text-emerald-600 dark:text-emerald-400">
+                                            {{ bom.produk?.item_type ?? 'FG' }}
+                                        </span>
                                     </div>
                                 </div>
                             </td>
-                            <td class="px-3 py-2 text-center">
+                            <td class="px-3 py-3">
+                                <div class="flex flex-col">
+                                    <span class="font-mono font-bold text-gray-800 dark:text-gray-200">
+                                        v{{ bom.version }}
+                                    </span>
+                                    <span class="text-[11px] text-gray-500 dark:text-gray-400 font-mono">
+                                        Base: {{ bom.base_qty || 1 }} {{ bom.uom?.code || bom.produk?.odoo_uom || 'Pcs' }}
+                                    </span>
+                                </div>
+                            </td>
+                            <td class="px-3 py-3">
+                                <div class="space-y-0.5">
+                                    <div
+                                        v-for="it in bom.items.slice(0, 3)"
+                                        :key="it.id"
+                                        class="flex items-center gap-1.5 text-gray-600 dark:text-gray-300"
+                                    >
+                                        <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                                        <span>{{ it.material_name }}</span>
+                                        <span class="font-mono font-semibold text-gray-800 dark:text-gray-200">
+                                            ({{ it.quantity }} {{ it.uom?.code || it.uom_name || '' }})
+                                        </span>
+                                    </div>
+                                    <div v-if="bom.items.length > 3" class="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                        + {{ bom.items.length - 3 }} komponen lainnya
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-3 py-3 text-center">
                                 <span
                                     :class="
                                         bom.is_active
-                                            ? 'bg-emerald-100 text-emerald-800'
-                                            : 'bg-gray-100 text-gray-500'
+                                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                            : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
                                     "
-                                    class="rounded px-2 py-0.5 text-[10px] font-bold uppercase"
-                                    >{{
-                                        bom.is_active ? 'Aktif' : 'Nonaktif'
-                                    }}</span
+                                    class="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase"
                                 >
+                                    {{ bom.is_active ? 'Aktif' : 'Nonaktif' }}
+                                </span>
                             </td>
-                            <td class="space-x-2 px-3 py-2 text-right">
-                                <button
-                                    class="font-semibold text-indigo-600 hover:underline"
-                                    @click="openEdit(bom)"
-                                >
-                                    Edit
-                                </button>
-                                <button
-                                    class="font-semibold text-red-600 hover:underline"
-                                    @click="deleteId = bom.id"
-                                >
-                                    Hapus
-                                </button>
+                            <td class="px-4 py-3 text-right">
+                                <div class="flex items-center justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        @click="openBreakdown(bom)"
+                                        class="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700 shadow-sm transition hover:bg-emerald-100 active:scale-95 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
+                                        title="Breakdown detail komposisi dan UoM 1 Pcs"
+                                    >
+                                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                                        </svg>
+                                        <span>Breakdown 1 Pcs</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
+                                        @click="openEdit(bom)"
+                                    >
+                                        Edit
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="font-semibold text-red-600 hover:underline dark:text-red-400"
+                                        @click="deleteId = bom.id"
+                                    >
+                                        Hapus
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                         <tr v-if="boms.data.length === 0">
@@ -327,7 +363,7 @@ function goToPage(page: number) {
                                 colspan="5"
                                 class="px-3 py-8 text-center text-gray-400"
                             >
-                                Belum ada BOM
+                                Belum ada data BOM
                             </td>
                         </tr>
                     </tbody>
@@ -499,5 +535,19 @@ function goToPage(page: number) {
                 </div>
             </div>
         </Modal>
+
+        <!-- Odoo BOM Preview & Selection Modal -->
+        <OdooBomSyncModal
+            :show="showBomSyncModal"
+            @close="showBomSyncModal = false"
+            @synced="handleBomSynced"
+        />
+
+        <!-- BOM 1 Pcs Composition & Multi-level Breakdown Modal -->
+        <BomBreakdownModal
+            :show="showBreakdownModal"
+            :bom-id="selectedBreakdownBomId"
+            @close="showBreakdownModal = false"
+        />
     </AuthenticatedLayout>
 </template>

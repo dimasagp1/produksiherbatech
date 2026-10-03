@@ -1,1 +1,0 @@
-import{E as e,N as t,S as n,h as r,u as i,v as a,z as o}from"./app-BHTu-lrq.js";var s={class:`text-sm text-red-600 dark:text-red-400`},c=n({__name:`InputError`,props:{message:{}},setup(n){return(c,l)=>t((e(),a(`div`,null,[r(`p`,s,o(n.message),1)],512)),[[i,n.message]])}});export{c as t};

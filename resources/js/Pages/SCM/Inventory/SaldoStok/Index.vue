@@ -10,6 +10,7 @@ import TextInput from '@/Components/TextInput.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import OdooStockSyncModal from '@/Components/OdooStockSyncModal.vue';
 
 interface Produk {
     id: number;
@@ -119,18 +120,14 @@ function submitAdjust() {
 }
 
 const syncing = ref(false);
+const showStockSyncModal = ref(false);
 
 function syncStocks() {
-    syncing.value = true;
-    router.post(
-        route('scm.saldo-stok.sync-odoo'),
-        {},
-        {
-            onFinish: () => {
-                syncing.value = false;
-            },
-        },
-    );
+    showStockSyncModal.value = true;
+}
+
+function handleStockSynced() {
+    router.reload();
 }
 
 function filterByType(type: string) {
@@ -579,5 +576,12 @@ function goToPage(page: number) {
                 </div>
             </form>
         </Modal>
+
+        <!-- Odoo Stock Preview & Selection Modal -->
+        <OdooStockSyncModal
+            :show="showStockSyncModal"
+            @close="showStockSyncModal = false"
+            @synced="handleStockSynced"
+        />
     </AuthenticatedLayout>
 </template>

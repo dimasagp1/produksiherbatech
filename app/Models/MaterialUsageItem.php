@@ -25,6 +25,19 @@ class MaterialUsageItem extends Model
         'variance' => 'float',
     ];
 
+    protected $appends = [
+        'ratio_persen',
+    ];
+
+    public function getRatioPersenAttribute(): ?float
+    {
+        if ($this->quantity_standard > 0) {
+            return round((($this->quantity_used - $this->quantity_standard) / $this->quantity_standard) * 100, 2);
+        }
+
+        return null;
+    }
+
     public function usage()
     {
         return $this->belongsTo(MaterialUsage::class, 'material_usage_id');

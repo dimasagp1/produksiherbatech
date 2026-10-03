@@ -65,13 +65,19 @@ class WeeklyPlanController extends Controller
             ->where('status', 'draft')
             ->first();
 
+        $multiplier = (int) Setting::get('target_output_multiplier', 2000);
+        $mpCount = (int) ($validated['mp_count'] ?? 0);
+        $targetOutput = ! empty($validated['target_output'])
+            ? (int) $validated['target_output']
+            : ($existingDraft?->target_output ?: ($mpCount * $multiplier));
+
         if ($existingDraft && $existingDraft->tanggal !== $validated['tanggal']) {
             $existingDraft->update([
                 'tanggal' => $validated['tanggal'],
-                'line_id' => $validated['line_id'],
+                'line_id' => $validated['line_id'] ?? null,
                 'proses' => $validated['proses'],
-                'mp_count' => (int) ($validated['mp_count'] ?? 0),
-                'target_output' => $validated['target_output'] ?: ($existingDraft->target_output ?: ((int) ($validated['mp_count'] ?? 0) * (int) Setting::get('target_output_multiplier', 2000))),
+                'mp_count' => $mpCount,
+                'target_output' => $targetOutput,
             ]);
 
             return redirect()->route('ppic.weekly-plan.index')
@@ -106,14 +112,12 @@ class WeeklyPlanController extends Controller
             return back()->withErrors(['proses' => 'Proses '.ucfirst($validated['proses']).' sudah ada untuk produk ini pada tanggal tersebut.']);
         }
 
-        $multiplier = (int) Setting::get('target_output_multiplier', 2000);
         $validated['created_by'] = auth()->id();
-        $validated['mp_count'] = (int) ($validated['mp_count'] ?? 0);
+        $validated['mp_count'] = $mpCount;
         $validated['multiplier'] = $multiplier;
+        $validated['line_id'] = $validated['line_id'] ?? null;
         $validated['mo_status'] = $validated['mo_status'] ?? WeeklyPlan::MO_STATUS_PENDING;
-        if (empty($validated['target_output'])) {
-            $validated['target_output'] = $validated['mp_count'] * $multiplier;
-        }
+        $validated['target_output'] = $targetOutput;
 
         WeeklyPlan::create($validated);
 
