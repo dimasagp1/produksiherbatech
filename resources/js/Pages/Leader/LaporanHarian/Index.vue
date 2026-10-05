@@ -188,7 +188,7 @@ function oeeColor(v: number | null): string {
             >
                 <div class="overflow-x-auto">
                     <table
-                        class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm"
+                        class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm min-w-[750px]"
                     >
                         <thead class="bg-gray-50 dark:bg-gray-700/70">
                             <tr>

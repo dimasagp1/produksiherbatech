@@ -1651,7 +1651,7 @@ function laporanTimerLabel(l: Laporan) {
                             class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700"
                         >
                             <table
-                                class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-700"
+                                class="min-w-[550px] w-full divide-y divide-gray-200 text-sm dark:divide-gray-700"
                             >
                                 <thead
                                     class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-gray-700/50 dark:text-gray-400"

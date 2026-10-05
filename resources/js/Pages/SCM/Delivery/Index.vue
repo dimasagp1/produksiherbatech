@@ -321,140 +321,230 @@ function goToPage(page: number) {
             </div>
 
             <!-- Table view -->
-            <div
-                v-else
-                class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800"
-            >
-                <table class="w-full text-xs">
-                    <thead class="bg-gray-50 dark:bg-gray-700/60">
-                        <tr>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                No
-                            </th>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                Pelanggan
-                            </th>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                Rencana
-                            </th>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                Armada
-                            </th>
-                            <th
-                                class="px-3 py-2 text-center font-semibold text-gray-500"
-                            >
-                                Status
-                            </th>
-                            <th
-                                class="px-3 py-2 text-center font-semibold text-gray-500"
-                            >
-                                KPI
-                            </th>
-                            <th
-                                class="px-3 py-2 text-center font-semibold text-gray-500"
-                            >
-                                Aksi
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody
-                        class="divide-y divide-gray-100 dark:divide-gray-700"
-                    >
-                        <tr v-for="p in plans.data" :key="p.id">
-                            <td
-                                class="px-3 py-2 font-mono font-semibold text-gray-900 dark:text-gray-100"
-                            >
-                                {{ p.delivery_number }}
-                            </td>
-                            <td class="px-3 py-2">{{ p.customer_name }}</td>
-                            <td class="px-3 py-2">{{ p.planned_date }}</td>
-                            <td class="px-3 py-2">
-                                {{ p.fleet?.nama_armada ?? '-' }}
-                            </td>
-                            <td class="px-3 py-2 text-center">
-                                <span
-                                    :class="statusColor[p.status]"
-                                    class="rounded px-2 py-0.5 text-[10px] font-bold uppercase"
-                                    >{{ p.status }}</span
-                                >
-                            </td>
-                            <td class="px-3 py-2 text-center text-[10px]">
-                                <span
-                                    v-if="p.on_time !== null"
-                                    :class="
-                                        p.on_time
-                                            ? 'text-emerald-600'
-                                            : 'text-red-600'
-                                    "
-                                    >OTD
-                                </span>
-                                <span
-                                    v-if="p.in_full !== null"
-                                    :class="
-                                        p.in_full
-                                            ? 'text-emerald-600'
-                                            : 'text-red-600'
-                                    "
-                                    >IF
-                                </span>
-                                <span
-                                    v-if="p.damage_free !== null"
-                                    :class="
-                                        p.damage_free
-                                            ? 'text-emerald-600'
-                                            : 'text-red-600'
-                                    "
-                                    >DF
-                                </span>
-                                <span v-if="p.complaint" class="text-red-600"
-                                    >Cmp</span
-                                >
-                                <span
-                                    v-if="
-                                        p.on_time === null &&
-                                        p.in_full === null &&
-                                        !p.complaint
-                                    "
-                                    class="text-gray-400"
-                                    >-</span
-                                >
-                            </td>
-                            <td class="px-3 py-2 text-center">
-                                <Link
-                                    :href="route('scm.delivery.show', p.id)"
-                                    class="font-semibold text-indigo-600 hover:underline"
-                                    >Buka</Link
-                                >
-                            </td>
-                        </tr>
-                        <tr v-if="plans.data.length === 0">
-                            <td
-                                colspan="7"
-                                class="px-3 py-8 text-center text-gray-400"
-                            >
-                                Belum ada delivery plan
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+            <div v-else class="space-y-3">
+                <!-- DESKTOP / TABLET TABLE (md and up) -->
                 <div
-                    class="border-t border-gray-200 px-4 py-2 dark:border-gray-700"
+                    class="hidden overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 md:block"
                 >
-                    <Pagination
-                        :current-page="plans.current_page"
-                        :last-page="plans.last_page"
-                        :total="plans.total"
-                        :per-page="plans.per_page"
-                        @page="goToPage"
-                    />
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs min-w-[650px]">
+                            <thead class="bg-gray-50 dark:bg-gray-700/60">
+                                <tr>
+                                    <th
+                                        class="px-3 py-2 text-left font-semibold text-gray-500"
+                                    >
+                                        No. Delivery
+                                    </th>
+                                    <th
+                                        class="px-3 py-2 text-left font-semibold text-gray-500"
+                                    >
+                                        Pelanggan
+                                    </th>
+                                    <th
+                                        class="px-3 py-2 text-left font-semibold text-gray-500"
+                                    >
+                                        Rencana
+                                    </th>
+                                    <th
+                                        class="px-3 py-2 text-left font-semibold text-gray-500"
+                                    >
+                                        Armada
+                                    </th>
+                                    <th
+                                        class="px-3 py-2 text-center font-semibold text-gray-500"
+                                    >
+                                        Status
+                                    </th>
+                                    <th
+                                        class="px-3 py-2 text-center font-semibold text-gray-500"
+                                    >
+                                        KPI Delivery
+                                    </th>
+                                    <th
+                                        class="px-3 py-2 text-center font-semibold text-gray-500"
+                                    >
+                                        Aksi
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody
+                                class="divide-y divide-gray-100 dark:divide-gray-700"
+                            >
+                                <tr v-for="p in plans.data" :key="p.id" class="hover:bg-gray-50/70 dark:hover:bg-gray-700/40">
+                                    <td
+                                        class="px-3 py-2.5 font-mono font-semibold text-gray-900 dark:text-gray-100"
+                                    >
+                                        {{ p.delivery_number }}
+                                    </td>
+                                    <td class="px-3 py-2.5">{{ p.customer_name }}</td>
+                                    <td class="px-3 py-2.5">{{ p.planned_date }}</td>
+                                    <td class="px-3 py-2.5">
+                                        {{ p.fleet?.nama_armada ?? '-' }}
+                                    </td>
+                                    <td class="px-3 py-2.5 text-center">
+                                        <span
+                                            :class="statusColor[p.status]"
+                                            class="rounded px-2 py-0.5 text-[10px] font-bold uppercase"
+                                            >{{ p.status }}</span
+                                        >
+                                    </td>
+                                    <td class="px-3 py-2.5 text-center text-[10px]">
+                                        <div class="flex items-center justify-center gap-1 font-bold">
+                                            <span
+                                                v-if="p.on_time !== null"
+                                                :class="
+                                                    p.on_time
+                                                        ? 'text-emerald-600 bg-emerald-50 px-1 rounded'
+                                                        : 'text-red-600 bg-red-50 px-1 rounded'
+                                                "
+                                                >OTD
+                                            </span>
+                                            <span
+                                                v-if="p.in_full !== null"
+                                                :class="
+                                                    p.in_full
+                                                        ? 'text-emerald-600 bg-emerald-50 px-1 rounded'
+                                                        : 'text-red-600 bg-red-50 px-1 rounded'
+                                                "
+                                                >IF
+                                            </span>
+                                            <span
+                                                v-if="p.damage_free !== null"
+                                                :class="
+                                                    p.damage_free
+                                                        ? 'text-emerald-600 bg-emerald-50 px-1 rounded'
+                                                        : 'text-red-600 bg-red-50 px-1 rounded'
+                                                "
+                                                >DF
+                                            </span>
+                                            <span v-if="p.complaint" class="text-red-600 bg-red-50 px-1 rounded font-bold"
+                                                >Cmp</span
+                                            >
+                                            <span
+                                                v-if="
+                                                    p.on_time === null &&
+                                                    p.in_full === null &&
+                                                    !p.complaint
+                                                "
+                                                class="text-gray-400"
+                                                >-</span
+                                            >
+                                        </div>
+                                    </td>
+                                    <td class="px-3 py-2.5 text-center">
+                                        <Link
+                                            :href="route('scm.delivery.show', p.id)"
+                                            class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 shadow-2xs hover:bg-indigo-100 dark:bg-indigo-950/60 dark:text-indigo-300"
+                                        >
+                                            <span>Buka</span>
+                                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                            </svg>
+                                        </Link>
+                                    </td>
+                                </tr>
+                                <tr v-if="plans.data.length === 0">
+                                    <td
+                                        colspan="7"
+                                        class="px-3 py-8 text-center text-gray-400"
+                                    >
+                                        Belum ada delivery plan
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div
+                        class="border-t border-gray-200 px-4 py-2 dark:border-gray-700"
+                    >
+                        <Pagination
+                            :current-page="plans.current_page"
+                            :last-page="plans.last_page"
+                            :total="plans.total"
+                            :per-page="plans.per_page"
+                            @page="goToPage"
+                        />
+                    </div>
+                </div>
+
+                <!-- MOBILE CARD VIEW (md:hidden) -->
+                <div class="block space-y-3 md:hidden">
+                    <div
+                        v-if="plans.data.length === 0"
+                        class="rounded-xl border border-gray-200 bg-white p-6 text-center text-xs text-gray-400 dark:border-gray-700 dark:bg-gray-800"
+                    >
+                        Belum ada delivery plan.
+                    </div>
+
+                    <div
+                        v-for="p in plans.data"
+                        :key="p.id"
+                        class="rounded-xl border border-gray-200 bg-white p-4 shadow-2xs dark:border-gray-700 dark:bg-gray-800 space-y-3"
+                    >
+                        <div class="flex items-start justify-between gap-2 border-b border-gray-100 pb-2.5 dark:border-gray-700">
+                            <div>
+                                <span class="font-mono text-xs font-bold text-gray-900 dark:text-gray-100">
+                                    {{ p.delivery_number }}
+                                </span>
+                                <h4 class="font-bold text-gray-900 dark:text-gray-100 text-xs mt-0.5">
+                                    {{ p.customer_name }}
+                                </h4>
+                            </div>
+                            <span
+                                :class="statusColor[p.status]"
+                                class="rounded px-2 py-0.5 text-[10px] font-bold uppercase shrink-0"
+                            >
+                                {{ p.status }}
+                            </span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50">
+                                <span class="block text-[10px] text-gray-500">Rencana Kirim</span>
+                                <span class="font-semibold text-gray-800 dark:text-gray-200">
+                                    {{ p.planned_date }}
+                                </span>
+                            </div>
+                            <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50">
+                                <span class="block text-[10px] text-gray-500">Armada</span>
+                                <span class="font-semibold text-gray-800 dark:text-gray-200 truncate block">
+                                    {{ p.fleet?.nama_armada ?? '-' }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- KPI Score Indicators -->
+                        <div class="flex items-center justify-between pt-1 text-xs">
+                            <div class="flex items-center gap-1.5 text-[10px] font-bold">
+                                <span class="text-gray-500 font-normal">Metrik:</span>
+                                <span v-if="p.on_time !== null" :class="p.on_time ? 'text-emerald-600 bg-emerald-50 px-1 rounded' : 'text-red-600 bg-red-50 px-1 rounded'">OTD</span>
+                                <span v-if="p.in_full !== null" :class="p.in_full ? 'text-emerald-600 bg-emerald-50 px-1 rounded' : 'text-red-600 bg-red-50 px-1 rounded'">IF</span>
+                                <span v-if="p.damage_free !== null" :class="p.damage_free ? 'text-emerald-600 bg-emerald-50 px-1 rounded' : 'text-red-600 bg-red-50 px-1 rounded'">DF</span>
+                                <span v-if="p.complaint" class="text-red-600 bg-red-50 px-1 rounded">Complaint</span>
+                            </div>
+
+                            <Link
+                                :href="route('scm.delivery.show', p.id)"
+                                class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:text-indigo-300"
+                            >
+                                <span>Buka</span>
+                                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                                </svg>
+                            </Link>
+                        </div>
+                    </div>
+
+                    <!-- Mobile Pagination -->
+                    <div v-if="plans.data.length > 0" class="pt-2">
+                        <Pagination
+                            :current-page="plans.current_page"
+                            :last-page="plans.last_page"
+                            :total="plans.total"
+                            :per-page="plans.per_page"
+                            @page="goToPage"
+                        />
+                    </div>
                 </div>
             </div>
         </div>

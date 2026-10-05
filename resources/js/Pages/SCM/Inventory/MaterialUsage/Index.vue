@@ -189,10 +189,10 @@ function onOdooSynced(res: any) {
                 </div>
             </div>
 
-            <!-- Main Table Card -->
-            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-700 dark:bg-slate-800">
+            <!-- DESKTOP / TABLET TABLE VIEW (md and up) -->
+            <div class="hidden overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-700 dark:bg-slate-800 md:block">
                 <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs">
+                    <table class="w-full text-left text-xs min-w-[750px]">
                         <thead class="border-b border-slate-200 bg-slate-50/80 text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
                             <tr>
                                 <th class="px-4 py-3.5 font-bold uppercase tracking-wider text-[11px]">No. Usage & Tanggal</th>
@@ -292,7 +292,7 @@ function onOdooSynced(res: any) {
                                                 v-if="u.items.length > 2"
                                                 type="button"
                                                 @click="toggleExpandUsage(u.id)"
-                                                class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 hover:underline inline-flex items-center gap-1 mt-1"
+                                                class="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 hover:underline inline-flex items-center gap-1 mt-1 cursor-pointer"
                                             >
                                                 <span>{{ expandedUsageIds.includes(u.id) ? 'Sembunyikan' : `+ ${u.items.length - 2} material lainnya...` }}</span>
                                             </button>
@@ -346,6 +346,110 @@ function onOdooSynced(res: any) {
 
                 <!-- Pagination -->
                 <div class="border-t border-slate-200 px-4 py-3 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30">
+                    <Pagination
+                        :current-page="usages.current_page"
+                        :last-page="usages.last_page"
+                        :total="usages.total"
+                        :per-page="usages.per_page"
+                        @page="goToPage"
+                    />
+                </div>
+            </div>
+
+            <!-- MOBILE CARD VIEW (md:hidden) -->
+            <div class="block space-y-3 md:hidden">
+                <div
+                    v-if="usages.data.length === 0"
+                    class="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-400 dark:border-slate-700 dark:bg-slate-800"
+                >
+                    Belum ada data Material Usage.
+                </div>
+
+                <div
+                    v-for="u in usages.data"
+                    :key="u.id"
+                    class="rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs dark:border-slate-700 dark:bg-slate-800 space-y-3"
+                >
+                    <div class="flex items-start justify-between gap-2 border-b border-slate-100 pb-2.5 dark:border-slate-700">
+                        <div>
+                            <span class="font-mono text-xs font-bold text-slate-900 dark:text-slate-100">
+                                {{ u.usage_number }}
+                            </span>
+                            <div class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                {{ u.usage_date }} <span v-if="u.shift">· {{ u.shift }}</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col items-end">
+                            <span
+                                class="rounded-full px-2 py-0.5 text-[11px] font-bold"
+                                :class="ratioBadgeClass(overallRatio(u))"
+                            >
+                                {{ overallRatio(u) !== null ? `${overallRatio(u)}%` : '-' }}
+                            </span>
+                            <span class="text-[9px] text-slate-400 mt-0.5">
+                                {{ (overallRatio(u) ?? 0) <= ratioTarget ? 'On Target' : 'Over' }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="text-xs font-bold text-slate-900 dark:text-slate-100">
+                            {{ u.weekly_plan?.produk?.nama_produk ?? 'Tanpa Produk Terkait' }}
+                        </div>
+                        <div class="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+                            <span v-if="u.weekly_plan?.produk?.kode_produk" class="rounded bg-indigo-50 px-1.5 py-0.5 font-mono font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                                {{ u.weekly_plan.produk.kode_produk }}
+                            </span>
+                            <span class="rounded bg-amber-50 px-1.5 py-0.5 font-mono font-bold text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+                                Batch: {{ u.weekly_plan?.batch_number ?? '-' }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Material List Summary in Mobile Card -->
+                    <div class="space-y-1.5 pt-1">
+                        <div
+                            v-for="it in (expandedUsageIds.includes(u.id) ? u.items : u.items.slice(0, 2))"
+                            :key="it.id"
+                            class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 p-2 text-[11px] dark:bg-slate-900/40"
+                        >
+                            <span class="font-medium text-slate-800 dark:text-slate-200 truncate">
+                                {{ it.material_name }}
+                            </span>
+                            <div class="font-mono text-right shrink-0">
+                                <span class="font-bold text-slate-900 dark:text-slate-100">{{ it.quantity_used }}</span>
+                                <span class="text-slate-400 text-[10px]"> / {{ it.quantity_standard }} {{ getItemUom(it) }}</span>
+                            </div>
+                        </div>
+
+                        <button
+                            v-if="u.items.length > 2"
+                            type="button"
+                            @click="toggleExpandUsage(u.id)"
+                            class="text-[11px] font-semibold text-indigo-600 hover:underline dark:text-indigo-400 cursor-pointer"
+                        >
+                            {{ expandedUsageIds.includes(u.id) ? 'Sembunyikan' : `+ ${u.items.length - 2} material lainnya...` }}
+                        </button>
+                    </div>
+
+                    <div class="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-700">
+                        <span class="text-[10px] text-slate-400">
+                            {{ u.user?.name ? `Oleh ${u.user.name}` : '' }}
+                        </span>
+                        <Link
+                            :href="route('scm.material-usage.show', u.id)"
+                            class="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 shadow-2xs hover:bg-indigo-100 dark:bg-indigo-950/60 dark:text-indigo-300"
+                        >
+                            <span>Detail Pemakaian</span>
+                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                            </svg>
+                        </Link>
+                    </div>
+                </div>
+
+                <!-- Mobile Pagination -->
+                <div v-if="usages.data.length > 0" class="pt-2">
                     <Pagination
                         :current-page="usages.current_page"
                         :last-page="usages.last_page"

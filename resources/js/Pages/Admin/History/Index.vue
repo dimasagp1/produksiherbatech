@@ -230,7 +230,7 @@ function filterData() {
             >
                 <!-- Desktop table -->
                 <div class="hidden overflow-x-auto md:block">
-                    <table class="min-w-full text-sm">
+                    <table class="min-w-[800px] w-full text-sm">
                         <thead>
                             <tr
                                 class="border-b border-gray-200 dark:border-gray-700"

@@ -376,7 +376,7 @@ function submit() {
                     </div>
 
                     <div class="overflow-x-auto">
-                        <table class="w-full text-xs">
+                        <table class="w-full text-xs min-w-[700px]">
                             <thead class="border-b border-slate-200 bg-slate-50/80 text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
                                 <tr>
                                     <th class="px-3 py-3 text-left font-bold uppercase tracking-wider text-[11px]">Nama Material / Bahan</th>

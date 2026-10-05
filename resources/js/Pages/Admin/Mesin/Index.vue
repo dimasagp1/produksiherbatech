@@ -124,7 +124,7 @@ function doSearch() {
             >
                 <div class="overflow-x-auto">
                     <table
-                        class="min-w-full divide-y divide-gray-200 dark:divide-gray-700"
+                        class="min-w-[600px] w-full divide-y divide-gray-200 dark:divide-gray-700"
                     >
                         <thead class="bg-gray-50 dark:bg-gray-700">
                             <tr>

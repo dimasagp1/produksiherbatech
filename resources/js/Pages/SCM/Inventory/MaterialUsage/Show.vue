@@ -435,7 +435,7 @@ const filteredItems = computed(() => {
 
                 <!-- Table -->
                 <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs">
+                    <table class="w-full text-left text-xs min-w-[750px]">
                         <thead class="border-b border-slate-200 bg-slate-50/50 text-slate-600 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
                             <tr>
                                 <th class="w-10 px-3 py-3 text-center font-bold uppercase tracking-wider text-[11px]">No</th>
@@ -553,7 +553,7 @@ const filteredItems = computed(() => {
 
                                             <!-- Raw Materials Nested Table -->
                                             <div class="mt-3 overflow-x-auto">
-                                                <table class="w-full text-left text-xs">
+                                                <table class="w-full text-left text-xs min-w-[550px]">
                                                     <thead class="bg-amber-50/60 text-slate-700 dark:bg-amber-950/40 dark:text-slate-200 border-b border-amber-100 dark:border-amber-900/40">
                                                         <tr>
                                                             <th class="w-8 px-3 py-2 text-center font-bold">#</th>

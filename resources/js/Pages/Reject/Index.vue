@@ -942,7 +942,7 @@ const jenisLabel = computed(() => {
                 <!-- DESKTOP TABLE VIEW (md and up) -->
                 <div class="hidden overflow-hidden bg-white shadow-sm dark:bg-gray-800 sm:rounded-lg md:block border border-gray-200 dark:border-gray-700">
                     <div class="overflow-x-auto">
-                        <table class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm">
+                        <table class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm min-w-[750px]">
                             <thead class="bg-gray-50 dark:bg-gray-700/70">
                                 <tr>
                                     <th class="w-8 px-2 py-2.5 text-center text-xs font-semibold uppercase text-gray-400"></th>
@@ -1062,7 +1062,7 @@ const jenisLabel = computed(() => {
                                                 </div>
 
                                                 <div v-else class="overflow-x-auto">
-                                                    <table class="min-w-full divide-y divide-gray-200 text-xs dark:divide-gray-700">
+                                                    <table class="min-w-[800px] w-full divide-y divide-gray-200 text-xs dark:divide-gray-700">
                                                         <thead class="bg-gray-50 dark:bg-gray-700/80">
                                                             <tr>
                                                                 <th class="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300">Material / Komponen yang Di-Reject</th>
@@ -1289,7 +1289,7 @@ const jenisLabel = computed(() => {
                 <!-- DESKTOP TABLE VIEW BREAKDOWN -->
                 <div class="hidden overflow-hidden bg-white shadow-sm dark:bg-gray-800 sm:rounded-lg md:block border border-gray-200 dark:border-gray-700">
                     <div class="overflow-x-auto">
-                        <table class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm">
+                        <table class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm min-w-[800px]">
                             <thead class="bg-gray-50 dark:bg-gray-700/70">
                                 <tr>
                                     <th class="whitespace-nowrap px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
@@ -1556,7 +1556,7 @@ const jenisLabel = computed(() => {
                 <!-- DESKTOP TABLE VIEW ODOO -->
                 <div class="hidden overflow-hidden bg-white shadow-sm dark:bg-gray-800 sm:rounded-lg md:block border border-gray-200 dark:border-gray-700">
                     <div class="overflow-x-auto">
-                        <table class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm">
+                        <table class="w-full divide-y divide-gray-200 text-xs dark:divide-gray-700 sm:text-sm min-w-[700px]">
                             <thead class="bg-gray-50 dark:bg-gray-700/70">
                                 <tr>
                                     <th class="w-8 px-2 py-2.5 text-center text-xs font-semibold uppercase text-gray-400"></th>
@@ -1916,8 +1916,8 @@ const jenisLabel = computed(() => {
                                 {{ activeRecipe.raw_materials_count }} Bahan Baku
                             </span>
                         </div>
-                        <div class="max-h-64 overflow-y-auto">
-                            <table class="min-w-full divide-y divide-gray-200 text-xs dark:divide-gray-700">
+                        <div class="max-h-64 overflow-auto">
+                            <table class="min-w-[450px] w-full divide-y divide-gray-200 text-xs dark:divide-gray-700">
                                 <thead class="bg-gray-100/70 dark:bg-gray-800 text-[11px] text-gray-600 dark:text-gray-300">
                                     <tr>
                                         <th class="px-3 py-2 text-left font-semibold">Nama Bahan Baku</th>

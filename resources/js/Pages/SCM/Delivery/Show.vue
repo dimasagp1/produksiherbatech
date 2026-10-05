@@ -188,40 +188,42 @@ const statusColor: Record<string, string> = {
                 <h3 class="mb-3 text-sm font-semibold uppercase text-gray-500">
                     Validasi Stok FG
                 </h3>
-                <table class="w-full text-xs">
-                    <thead class="bg-gray-50 dark:bg-gray-700/60">
-                        <tr>
-                            <th class="px-2 py-2 text-left">Produk</th>
-                            <th class="px-2 py-2 text-right">Diminta</th>
-                            <th class="px-2 py-2 text-right">Tersedia</th>
-                            <th class="px-2 py-2 text-center">Cukup?</th>
-                        </tr>
-                    </thead>
-                    <tbody
-                        class="divide-y divide-gray-100 dark:divide-gray-700"
-                    >
-                        <tr v-for="c in fgChecks" :key="c.product_name">
-                            <td class="px-2 py-2">{{ c.product_name }}</td>
-                            <td class="px-2 py-2 text-right font-mono">
-                                {{ c.requested }}
-                            </td>
-                            <td class="px-2 py-2 text-right font-mono">
-                                {{ c.available_fg }}
-                            </td>
-                            <td class="px-2 py-2 text-center">
-                                <span
-                                    :class="
-                                        c.sufficient
-                                            ? 'bg-emerald-100 text-emerald-800'
-                                            : 'bg-red-100 text-red-800'
-                                    "
-                                    class="rounded px-2 py-0.5 text-[10px] font-bold uppercase"
-                                    >{{ c.sufficient ? 'OK' : 'Kurang' }}</span
-                                >
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs min-w-[300px]">
+                        <thead class="bg-gray-50 dark:bg-gray-700/60">
+                            <tr>
+                                <th class="px-3 py-2 text-left">Produk</th>
+                                <th class="px-3 py-2 text-right">Diminta</th>
+                                <th class="px-3 py-2 text-right">Tersedia</th>
+                                <th class="px-3 py-2 text-center">Cukup?</th>
+                            </tr>
+                        </thead>
+                        <tbody
+                            class="divide-y divide-gray-100 dark:divide-gray-700"
+                        >
+                            <tr v-for="c in fgChecks" :key="c.product_name">
+                                <td class="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{{ c.product_name }}</td>
+                                <td class="px-3 py-2 text-right font-mono">
+                                    {{ c.requested }}
+                                </td>
+                                <td class="px-3 py-2 text-right font-mono font-semibold">
+                                    {{ c.available_fg }}
+                                </td>
+                                <td class="px-3 py-2 text-center">
+                                    <span
+                                        :class="
+                                            c.sufficient
+                                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                                : 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
+                                        "
+                                        class="rounded px-2 py-0.5 text-[10px] font-bold uppercase"
+                                        >{{ c.sufficient ? 'OK' : 'Kurang' }}</span
+                                    >
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <div
@@ -262,26 +264,28 @@ const statusColor: Record<string, string> = {
                         </div>
                     </div>
                 </div>
-                <table class="w-full text-xs">
-                    <thead class="bg-gray-50 dark:bg-gray-700/60">
-                        <tr>
-                            <th class="px-2 py-2 text-left">Produk</th>
-                            <th class="px-2 py-2 text-right">Qty</th>
-                            <th class="px-2 py-2 text-left">UOM</th>
-                        </tr>
-                    </thead>
-                    <tbody
-                        class="divide-y divide-gray-100 dark:divide-gray-700"
-                    >
-                        <tr v-for="it in plan.items" :key="it.id">
-                            <td class="px-2 py-2">{{ it.product_name }}</td>
-                            <td class="px-2 py-2 text-right font-mono">
-                                {{ it.quantity }}
-                            </td>
-                            <td class="px-2 py-2">{{ it.uom_name ?? '-' }}</td>
-                        </tr>
-                    </tbody>
-                </table>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs min-w-[300px]">
+                        <thead class="bg-gray-50 dark:bg-gray-700/60">
+                            <tr>
+                                <th class="px-3 py-2 text-left">Produk</th>
+                                <th class="px-3 py-2 text-right">Qty</th>
+                                <th class="px-3 py-2 text-left">UOM</th>
+                            </tr>
+                        </thead>
+                        <tbody
+                            class="divide-y divide-gray-100 dark:divide-gray-700"
+                        >
+                            <tr v-for="it in plan.items" :key="it.id">
+                                <td class="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{{ it.product_name }}</td>
+                                <td class="px-3 py-2 text-right font-mono font-bold">
+                                    {{ it.quantity }}
+                                </td>
+                                <td class="px-3 py-2 text-gray-500">{{ it.uom_name ?? '-' }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <!-- Status flow -->

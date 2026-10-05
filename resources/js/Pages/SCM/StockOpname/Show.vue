@@ -403,114 +403,200 @@ const statusColor: Record<string, string> = {
                 </button>
             </div>
 
+            <!-- DESKTOP / TABLET TABLE VIEW (md and up) -->
             <div
-                class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800"
+                class="hidden overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 md:block"
             >
-                <table class="w-full text-xs">
-                    <thead class="bg-gray-50 dark:bg-gray-700/60">
-                        <tr>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                ST Card
-                            </th>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                Produk / Material
-                            </th>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                Kategori
-                            </th>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                Batch
-                            </th>
-                            <th
-                                class="px-3 py-2 text-right font-semibold text-gray-500"
-                            >
-                                Saldo Odoo (Buku)
-                            </th>
-                            <th
-                                class="px-3 py-2 text-right font-semibold text-gray-500"
-                            >
-                                Hitung Fisik (IC)
-                            </th>
-                            <th
-                                class="px-3 py-2 text-right font-semibold text-gray-500"
-                            >
-                                Selisih
-                            </th>
-                            <th
-                                class="px-3 py-2 text-left font-semibold text-gray-500"
-                            >
-                                Alasan / Catatan IC
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody
-                        class="divide-y divide-gray-100 dark:divide-gray-700"
-                    >
-                        <tr v-for="it in filteredItems" :key="it.id">
-                            <td
-                                class="px-3 py-1.5 font-mono text-[11px] text-gray-500"
-                            >
-                                {{ it.stelling_card }}
-                            </td>
-                            <td
-                                class="px-3 py-1.5"
-                            >
-                                <div class="font-medium text-gray-900 dark:text-gray-100">
-                                    {{ it.produk?.nama_produk ?? '-' }}
-                                </div>
-                                <div class="text-[10px] font-mono text-gray-500">
-                                    {{ it.produk?.kode_produk ?? '' }}
-                                </div>
-                            </td>
-                            <td class="px-3 py-1.5">
-                                <span
-                                    :class="itemTypeBadge(it.produk?.item_type).cls"
-                                    class="inline-block rounded-md border px-1.5 py-0.5 text-[9px] font-semibold"
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs min-w-[950px]">
+                        <thead class="bg-gray-50 dark:bg-gray-700/60">
+                            <tr>
+                                <th
+                                    class="px-3 py-2 text-left font-semibold text-gray-500"
                                 >
-                                    {{ itemTypeBadge(it.produk?.item_type).label }}
-                                </span>
-                            </td>
-                            <td class="px-3 py-1.5 font-mono text-gray-600 dark:text-gray-300">
-                                {{ it.batch_number ?? '-' }}
-                            </td>
-                            <td class="px-3 py-1.5 text-right font-mono font-semibold text-gray-800 dark:text-gray-200">
-                                {{ Number(it.system_qty).toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 3 }) }}
-                                <span class="text-[10px] font-normal text-gray-500 ml-0.5">{{ it.produk?.uom?.code ?? it.produk?.odoo_uom ?? '' }}</span>
-                            </td>
-                            <td class="px-3 py-1.5 text-right">
-                                <template v-if="canEdit && canInput">
-                                    <div class="flex items-center justify-end gap-1">
-                                        <TextInput
-                                            v-model="counted[it.id].counted_qty"
-                                            type="number"
-                                            step="0.001"
-                                            min="0"
-                                            placeholder="Input fisik"
-                                            class="block w-28 text-right font-bold text-indigo-600 dark:text-indigo-400"
-                                        />
-                                        <span class="text-[10px] text-gray-500 font-mono">{{ it.produk?.uom?.code ?? it.produk?.odoo_uom ?? '' }}</span>
+                                    ST Card
+                                </th>
+                                <th
+                                    class="px-3 py-2 text-left font-semibold text-gray-500"
+                                >
+                                    Produk / Material
+                                </th>
+                                <th
+                                    class="px-3 py-2 text-left font-semibold text-gray-500"
+                                >
+                                    Kategori
+                                </th>
+                                <th
+                                    class="px-3 py-2 text-left font-semibold text-gray-500"
+                                >
+                                    Batch
+                                </th>
+                                <th
+                                    class="px-3 py-2 text-right font-semibold text-gray-500"
+                                >
+                                    Saldo Odoo (Buku)
+                                </th>
+                                <th
+                                    class="px-3 py-2 text-right font-semibold text-gray-500"
+                                >
+                                    Hitung Fisik (IC)
+                                </th>
+                                <th
+                                    class="px-3 py-2 text-right font-semibold text-gray-500"
+                                >
+                                    Selisih
+                                </th>
+                                <th
+                                    class="px-3 py-2 text-left font-semibold text-gray-500"
+                                >
+                                    Alasan / Catatan IC
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody
+                            class="divide-y divide-gray-100 dark:divide-gray-700"
+                        >
+                            <tr v-for="it in filteredItems" :key="it.id" class="hover:bg-gray-50/70 dark:hover:bg-gray-700/40">
+                                <td
+                                    class="px-3 py-2 font-mono text-[11px] text-gray-500"
+                                >
+                                    {{ it.stelling_card }}
+                                </td>
+                                <td
+                                    class="px-3 py-2"
+                                >
+                                    <div class="font-medium text-gray-900 dark:text-gray-100">
+                                        {{ it.produk?.nama_produk ?? '-' }}
                                     </div>
-                                </template>
-                                <template v-else>
-                                    <span class="font-mono font-bold">{{ it.counted_qty ?? '-' }}</span>
-                                    <span v-if="it.counted_qty !== null" class="text-[10px] text-gray-500 ml-0.5">{{ it.produk?.uom?.code ?? it.produk?.odoo_uom ?? '' }}</span>
-                                </template>
-                            </td>
-                            <td
-                                class="px-3 py-1.5 text-right font-mono font-bold"
-                                :class="
-                                    (it.discrepancy ?? 0) !== 0
-                                        ? 'text-red-600'
-                                        : 'text-emerald-600'
-                                "
+                                    <div class="text-[10px] font-mono text-gray-500">
+                                        {{ it.produk?.kode_produk ?? '' }}
+                                    </div>
+                                </td>
+                                <td class="px-3 py-2">
+                                    <span
+                                        :class="itemTypeBadge(it.produk?.item_type).cls"
+                                        class="inline-block rounded-md border px-1.5 py-0.5 text-[9px] font-semibold"
+                                    >
+                                        {{ itemTypeBadge(it.produk?.item_type).label }}
+                                    </span>
+                                </td>
+                                <td class="px-3 py-2 font-mono text-gray-600 dark:text-gray-300">
+                                    {{ it.batch_number ?? '-' }}
+                                </td>
+                                <td class="px-3 py-2 text-right font-mono font-semibold text-gray-800 dark:text-gray-200">
+                                    {{ Number(it.system_qty).toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 3 }) }}
+                                    <span class="text-[10px] font-normal text-gray-500 ml-0.5">{{ it.produk?.uom?.code ?? it.produk?.odoo_uom ?? '' }}</span>
+                                </td>
+                                <td class="px-3 py-2 text-right">
+                                    <template v-if="canEdit && canInput">
+                                        <div class="flex items-center justify-end gap-1">
+                                            <TextInput
+                                                v-model="counted[it.id].counted_qty"
+                                                type="number"
+                                                step="0.001"
+                                                min="0"
+                                                placeholder="Input fisik"
+                                                class="block w-28 text-right font-bold text-indigo-600 dark:text-indigo-400"
+                                            />
+                                            <span class="text-[10px] text-gray-500 font-mono">{{ it.produk?.uom?.code ?? it.produk?.odoo_uom ?? '' }}</span>
+                                        </div>
+                                    </template>
+                                    <template v-else>
+                                        <span class="font-mono font-bold">{{ it.counted_qty ?? '-' }}</span>
+                                        <span v-if="it.counted_qty !== null" class="text-[10px] text-gray-500 ml-0.5">{{ it.produk?.uom?.code ?? it.produk?.odoo_uom ?? '' }}</span>
+                                    </template>
+                                </td>
+                                <td
+                                    class="px-3 py-2 text-right font-mono font-bold"
+                                    :class="
+                                        (it.discrepancy ?? 0) !== 0
+                                            ? 'text-red-600'
+                                            : 'text-emerald-600'
+                                    "
+                                >
+                                    {{
+                                        it.discrepancy ??
+                                        (counted[it.id]?.counted_qty
+                                            ? (
+                                                  Number(
+                                                      counted[it.id].counted_qty,
+                                                  ) - Number(it.system_qty)
+                                              ).toFixed(2)
+                                            : '-')
+                                    }}
+                                </td>
+                                <td class="px-3 py-2">
+                                    <TextInput
+                                        v-if="canEdit && canInput"
+                                        v-model="counted[it.id].discrepancy_reason"
+                                        class="block w-full text-xs"
+                                        placeholder="Keterangan selisih / temuan IC"
+                                    />
+                                    <span v-else class="text-gray-600 dark:text-gray-300">{{
+                                        it.discrepancy_reason ?? '-'
+                                    }}</span>
+                                </td>
+                            </tr>
+                            <tr v-if="filteredItems.length === 0">
+                                <td
+                                    colspan="8"
+                                    class="px-3 py-8 text-center text-gray-400"
+                                >
+                                    Tidak ada item dalam kategori ini
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- MOBILE CARD VIEW (md:hidden) -->
+            <div class="block space-y-3 md:hidden">
+                <div
+                    v-if="filteredItems.length === 0"
+                    class="rounded-xl border border-gray-200 bg-white p-6 text-center text-xs text-gray-400 dark:border-gray-700 dark:bg-gray-800"
+                >
+                    Tidak ada item dalam kategori ini.
+                </div>
+
+                <div
+                    v-for="it in filteredItems"
+                    :key="it.id"
+                    class="rounded-xl border border-gray-200 bg-white p-4 shadow-2xs dark:border-gray-700 dark:bg-gray-800 space-y-3"
+                >
+                    <div class="flex items-start justify-between gap-2 border-b border-gray-100 pb-2.5 dark:border-gray-700">
+                        <div>
+                            <span class="font-mono text-[11px] text-gray-500">
+                                {{ it.stelling_card }}
+                            </span>
+                            <h4 class="font-bold text-gray-900 dark:text-gray-100 text-xs mt-0.5">
+                                {{ it.produk?.nama_produk ?? '-' }}
+                            </h4>
+                            <div class="text-[10px] font-mono text-gray-400">
+                                {{ it.produk?.kode_produk ?? '' }} · Batch: <span class="text-gray-700 dark:text-gray-300">{{ it.batch_number ?? '-' }}</span>
+                            </div>
+                        </div>
+                        <span
+                            :class="itemTypeBadge(it.produk?.item_type).cls"
+                            class="inline-block rounded-md border px-1.5 py-0.5 text-[9px] font-semibold shrink-0"
+                        >
+                            {{ itemTypeBadge(it.produk?.item_type).label }}
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50">
+                            <span class="block text-[10px] text-gray-500">Saldo Odoo (Buku)</span>
+                            <span class="font-mono font-bold text-gray-800 dark:text-gray-200">
+                                {{ Number(it.system_qty).toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 3 }) }}
+                                <span class="text-[10px] font-normal text-gray-500">{{ it.produk?.uom?.code ?? it.produk?.odoo_uom ?? '' }}</span>
+                            </span>
+                        </div>
+                        <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/50">
+                            <span class="block text-[10px] text-gray-500">Selisih Fisik</span>
+                            <span
+                                class="font-mono font-bold"
+                                :class="(it.discrepancy ?? 0) !== 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'"
                             >
                                 {{
                                     it.discrepancy ??
@@ -522,29 +608,39 @@ const statusColor: Record<string, string> = {
                                           ).toFixed(2)
                                         : '-')
                                 }}
-                            </td>
-                            <td class="px-3 py-1.5">
-                                <TextInput
-                                    v-if="canEdit && canInput"
-                                    v-model="counted[it.id].discrepancy_reason"
-                                    class="block w-full text-xs"
-                                    placeholder="Keterangan selisih / temuan IC"
-                                />
-                                <span v-else class="text-gray-600 dark:text-gray-300">{{
-                                    it.discrepancy_reason ?? '-'
-                                }}</span>
-                            </td>
-                        </tr>
-                        <tr v-if="filteredItems.length === 0">
-                            <td
-                                colspan="8"
-                                class="px-3 py-8 text-center text-gray-400"
-                            >
-                                Tidak ada item dalam kategori ini
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Input Fisik & Reason di Mobile -->
+                    <div v-if="canEdit && canInput" class="space-y-2 pt-1 border-t border-gray-100 dark:border-gray-700">
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-600 dark:text-gray-400 mb-1">
+                                Input Hitung Fisik ({{ it.produk?.uom?.code ?? it.produk?.odoo_uom ?? 'Pcs' }})
+                            </label>
+                            <TextInput
+                                v-model="counted[it.id].counted_qty"
+                                type="number"
+                                step="0.001"
+                                min="0"
+                                placeholder="0.00"
+                                class="block w-full text-xs font-bold text-indigo-600 dark:text-indigo-400"
+                            />
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-semibold text-gray-500 mb-1">Catatan / Alasan IC</label>
+                            <TextInput
+                                v-model="counted[it.id].discrepancy_reason"
+                                class="block w-full text-xs"
+                                placeholder="Alasan selisih..."
+                            />
+                        </div>
+                    </div>
+                    <div v-else class="text-xs pt-1 flex items-center justify-between text-gray-500">
+                        <span>Fisik: <strong class="text-gray-800 dark:text-gray-200">{{ it.counted_qty ?? '-' }} {{ it.produk?.uom?.code ?? it.produk?.odoo_uom ?? '' }}</strong></span>
+                        <span v-if="it.discrepancy_reason" class="text-[11px] italic text-gray-400">{{ it.discrepancy_reason }}</span>
+                    </div>
+                </div>
             </div>
         </div>
     </AuthenticatedLayout>
