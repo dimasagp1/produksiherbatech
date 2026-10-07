@@ -56,10 +56,22 @@ interface OdooBatchOption {
     status?: string;
 }
 
+interface WorkCenter {
+    id: number;
+    code: string;
+    name: string;
+    type: 'mixing' | 'filling' | 'secondary';
+    standard_ct_seconds: number;
+    fit_mp: number;
+    shift_hours: number;
+    is_active: boolean;
+}
+
 const props = defineProps<{
     weeklyPlans: WeeklyPlan[];
     produks: Produk[];
     lines?: Line[];
+    workCenters: WorkCenter[];
     targetOutputMultiplier?: number;
 }>();
 
@@ -262,7 +274,7 @@ const filteredTablePlans = computed(() => {
     }
 
     if (prosesFilter.value !== 'all') {
-        result = result.filter((p) => p.proses === prosesFilter.value);
+        result = result.filter((p) => p.workCenter?.type === prosesFilter.value || p.proses === prosesFilter.value);
     }
 
     if (moStatusFilter.value !== 'all') {
@@ -295,6 +307,7 @@ const boardPlans = computed(() => props.weeklyPlans);
 const createForm = useForm({
     produk_id: '',
     line_id: '',
+    work_center_id: '',
     proses: 'mixing',
     batch_number: '',
     tanggal: '',
@@ -306,6 +319,7 @@ const createForm = useForm({
 const editForm = useForm({
     produk_id: '',
     line_id: '',
+    work_center_id: '',
     proses: 'mixing',
     batch_number: '',
     tanggal: '',
@@ -322,6 +336,7 @@ function openEdit(item: WeeklyPlan | BoardPlan) {
     editItem.value = item as WeeklyPlan;
     editForm.produk_id = String(item.produk_id);
     editForm.line_id = item.line_id ? String(item.line_id) : '';
+    editForm.work_center_id = item.work_center_id ? String(item.work_center_id) : '';
     editForm.proses = item.proses;
     editForm.batch_number = item.batch_number;
     editForm.tanggal = item.tanggal;
@@ -334,8 +349,13 @@ function onProductChange() {
     if (!pId) return;
 
     const selectedProd = props.produks.find((p) => p.id === pId);
-    if (selectedProd && selectedProd.proses_default) {
-        createForm.proses = selectedProd.proses_default;
+    if (selectedProd && selectedProd.work_center_id) {
+        createForm.work_center_id = String(selectedProd.work_center_id);
+        // Find the work center to get its type for proses
+        const wc = props.workCenters.find(w => w.id === selectedProd.work_center_id);
+        if (wc) {
+            createForm.proses = wc.type;
+        }
     }
 
     const batches = odooBatchesByProduct.value[pId] ?? [];
@@ -364,6 +384,11 @@ function selectCreateBatch(b: OdooBatchOption) {
     createForm.mo_status = b.mo_status ?? 'pending';
     if (b.proses) {
         createForm.proses = b.proses;
+        // Find work center by type
+        const wc = props.workCenters.find(w => w.type === b.proses && w.is_active);
+        if (wc) {
+            createForm.work_center_id = String(wc.id);
+        }
     }
     if (b.target_output && Number(b.target_output) > 0) {
         const recMp = Math.ceil(Number(b.target_output) / multiplier.value);
@@ -375,6 +400,11 @@ function selectEditBatch(b: OdooBatchOption) {
     editForm.batch_number = b.batch_number;
     if (b.proses) {
         editForm.proses = b.proses;
+        // Find work center by type
+        const wc = props.workCenters.find(w => w.type === b.proses && w.is_active);
+        if (wc) {
+            editForm.work_center_id = String(wc.id);
+        }
     }
     if (b.target_output && Number(b.target_output) > 0) {
         const recMp = Math.ceil(Number(b.target_output) / multiplier.value);
@@ -465,16 +495,10 @@ function targetPreview(
     return mp * (planMultiplier || multiplier.value);
 }
 
-const prosesOptions = [
-    { value: 'mixing', label: 'Mixing' },
-    { value: 'filling', label: 'Filling' },
-    { value: 'packing', label: 'Packing' },
-];
-
-const prosesColor: Record<string, string> = {
+const typeColor: Record<string, string> = {
     mixing: 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800',
     filling: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800',
-    packing: 'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800',
+    secondary: 'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800',
 };
 
 const statusColor: Record<string, string> = {
@@ -489,6 +513,18 @@ const moColor: Record<string, string> = {
     in_progress: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800',
     done: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800',
     cancelled: 'bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300 border border-rose-200 dark:border-rose-800',
+};
+
+const workCenterTypeIcon: Record<string, string> = {
+    mixing: '🥣',
+    filling: '🥤',
+    secondary: '📦',
+};
+
+const workCenterTypeLabel: Record<string, string> = {
+    mixing: 'Mixing',
+    filling: 'Filling',
+    secondary: 'Secondary',
 };
 </script>
 
@@ -641,6 +677,7 @@ const moColor: Record<string, string> = {
                     :plans="boardPlans"
                     :multiplier="multiplier"
                     :startDate="currentWeekStart"
+                    :workCenters="workCenters"
                     @activate="activate"
                     @toggle-hold="toggleHold"
                     @edit="openEdit"
@@ -738,16 +775,16 @@ const moColor: Record<string, string> = {
                             </select>
                         </div>
 
-                        <!-- Proses Filter -->
+                        <!-- Work Center Filter -->
                         <div>
                             <select
                                 v-model="prosesFilter"
                                 class="block w-full rounded-lg border-gray-300 py-1.5 text-xs shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
                             >
-                                <option value="all">Semua Proses</option>
+                                <option value="all">Semua Work Center</option>
                                 <option value="mixing">Mixing</option>
                                 <option value="filling">Filling</option>
-                                <option value="packing">Packing</option>
+                                <option value="secondary">Secondary</option>
                             </select>
                         </div>
 
@@ -886,12 +923,23 @@ const moColor: Record<string, string> = {
                                         </div>
                                     </td>
 
-                                    <!-- Proses -->
+                                    <!-- Work Center -->
                                     <td class="whitespace-nowrap px-4 py-3">
                                         <span
+                                            v-if="plan.workCenter"
+                                            :class="[
+                                                'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold',
+                                                typeColor[plan.workCenter.type] ?? 'bg-gray-100 text-gray-800',
+                                            ]"
+                                        >
+                                            <span>{{ workCenterTypeIcon[plan.workCenter.type] }}</span>
+                                            {{ workCenterTypeLabel[plan.workCenter.type] }}
+                                        </span>
+                                        <span
+                                            v-else
                                             :class="[
                                                 'rounded-md px-2 py-0.5 text-[11px] font-bold capitalize',
-                                                prosesColor[plan.proses] ?? 'bg-gray-100 text-gray-800',
+                                                typeColor[plan.proses] ?? 'bg-gray-100 text-gray-800',
                                             ]"
                                         >
                                             {{ plan.proses }}
@@ -1299,24 +1347,42 @@ const moColor: Record<string, string> = {
                     />
                 </div>
                 <div class="mb-3">
-                    <InputLabel value="Proses" />
+                    <InputLabel value="Work Center" />
                     <select
-                        v-model="createForm.proses"
+                        v-model="createForm.work_center_id"
                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                         required
                     >
-                        <option
-                            v-for="opt in prosesOptions"
-                            :key="opt.value"
-                            :value="opt.value"
+                        <option value="" disabled>Pilih Work Center</option>
+                        <optgroup
+                            v-for="type in ['mixing', 'filling', 'secondary']"
+                            :key="type"
+                            :label="workCenterTypeLabel[type]"
                         >
-                            {{ opt.label }}
-                        </option>
+                            <option
+                                v-for="wc in workCenters.filter(w => w.type === type && w.is_active)"
+                                :key="wc.id"
+                                :value="wc.id"
+                            >
+                                {{ wc.code }} - {{ wc.name }} (CT: {{ wc.standard_ct_seconds }}s, MP: {{ wc.fit_mp }})
+                            </option>
+                        </optgroup>
                     </select>
                     <InputError
-                        :message="createForm.errors.proses"
+                        :message="createForm.errors.work_center_id"
                         class="mt-1"
                     />
+                </div>
+
+                <div class="mb-3">
+                    <InputLabel value="Proses (Auto dari Work Center)" />
+                    <input
+                        v-model="createForm.proses"
+                        type="text"
+                        class="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        readonly
+                    />
+                    <p class="mt-1 text-[10px] text-gray-500">Otomatis terisi berdasarkan Work Center yang dipilih</p>
                 </div>
 
                 <!-- Batch Number Field with Auto-filled Odoo Batches -->
@@ -1556,27 +1622,46 @@ const moColor: Record<string, string> = {
                     />
                 </div>
 
-                <!-- Proses Field -->
+                <!-- Work Center Field -->
                 <div class="mb-3">
-                    <InputLabel value="Proses" />
+                    <InputLabel value="Work Center" />
                     <select
-                        v-model="editForm.proses"
+                        v-model="editForm.work_center_id"
                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                         :disabled="editItem.status === 'aktif'"
                         :required="editItem.status === 'draft'"
                     >
-                        <option
-                            v-for="opt in prosesOptions"
-                            :key="opt.value"
-                            :value="opt.value"
+                        <option value="" disabled>Pilih Work Center</option>
+                        <optgroup
+                            v-for="type in ['mixing', 'filling', 'secondary']"
+                            :key="type"
+                            :label="workCenterTypeLabel[type]"
                         >
-                            {{ opt.label }}
-                        </option>
+                            <option
+                                v-for="wc in workCenters.filter(w => w.type === type && w.is_active)"
+                                :key="wc.id"
+                                :value="wc.id"
+                            >
+                                {{ wc.code }} - {{ wc.name }} (CT: {{ wc.standard_ct_seconds }}s, MP: {{ wc.fit_mp }})
+                            </option>
+                        </optgroup>
                     </select>
                     <InputError
-                        :message="editForm.errors.proses"
+                        :message="editForm.errors.work_center_id"
                         class="mt-1"
                     />
+                </div>
+
+                <!-- Proses Field (Auto dari Work Center) -->
+                <div class="mb-3">
+                    <InputLabel value="Proses (Auto dari Work Center)" />
+                    <input
+                        v-model="editForm.proses"
+                        type="text"
+                        class="mt-1 block w-full rounded-md border-gray-300 bg-gray-50 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        readonly
+                    />
+                    <p class="mt-1 text-[10px] text-gray-500">Otomatis terisi berdasarkan Work Center yang dipilih</p>
                 </div>
 
                 <!-- Batch Number Field -->

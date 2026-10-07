@@ -40,18 +40,33 @@ class FakeOdooService extends OdooService
         return ['success' => true, 'enabled' => true, 'message' => 'fake write-back ok'];
     }
 
-    public function syncBoms(): array
+    public function syncBoms(?array $selectedIds = null): array
     {
         return ['created' => 1, 'updated' => 0, 'skipped' => 0, 'errors' => []];
     }
 
-    public function syncInventoryStocks(): array
+    public function syncInventoryStocks(?array $selectedIds = null): array
     {
         return ['created' => 1, 'updated' => 0, 'skipped' => 0, 'errors' => []];
     }
 
-    public function syncMaterialUsages(int $limit = 50): array
+    public function syncMaterialUsages(?array $selectedMoIds = null): array
     {
         return ['created' => 1, 'updated' => 0, 'skipped' => 0, 'errors' => []];
+    }
+
+    public function fetchWorkCenters(): array
+    {
+        return [];
+    }
+
+    public function fetchBeginningStock(): array
+    {
+        return [];
+    }
+
+    public function syncBeginningStock(): array
+    {
+        return ['updated' => 0, 'created' => 0, 'errors' => []];
     }
 }

@@ -17,12 +17,18 @@ class MaterialUsageItem extends Model
         'quantity_standard',
         'variance',
         'uom_id',
+        'odoo_actual_qty',
+        'odoo_variance_persen',
+        'local_vs_odoo_variance_persen',
     ];
 
     protected $casts = [
         'quantity_used' => 'float',
         'quantity_standard' => 'float',
         'variance' => 'float',
+        'odoo_actual_qty' => 'float',
+        'odoo_variance_persen' => 'float',
+        'local_vs_odoo_variance_persen' => 'float',
     ];
 
     protected $appends = [
@@ -52,4 +58,4 @@ class MaterialUsageItem extends Model
     {
         return $this->belongsTo(ScmUom::class, 'uom_id');
     }
-}
+};

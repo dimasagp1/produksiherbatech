@@ -8,6 +8,7 @@ use App\Models\Line;
 use App\Models\Mesin;
 use App\Models\Produk;
 use App\Models\WeeklyPlan;
+use App\Models\WorkCenter;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -19,12 +20,15 @@ class LaporanHarianController extends Controller
         $user = auth()->user();
         $search = $request->input('search', '');
         $shift = $request->input('shift');
+        $workCenterId = $request->input('work_center_id');
 
-        $query = LaporanHarian::with(['produk', 'mesin', 'line', 'user']);
+        $query = LaporanHarian::with(['produk', 'mesin', 'line', 'user', 'workCenter']);
 
         if ($user->hasAnyRole(['leader', 'operator'])) {
             $query->where('user_id', $user->id);
         }
+
+        $query->when($workCenterId, fn ($q, $wc) => $q->where('work_center_id', $wc));
 
         $query->when($search, function ($q, $s) {
             $q->whereHas('produk', fn ($q) => $q->where('nama_produk', 'like', "%{$s}%"))
@@ -39,6 +43,8 @@ class LaporanHarianController extends Controller
             'laporans' => $laporans,
             'search' => $search,
             'shift' => $shift,
+            'workCenterId' => $workCenterId,
+            'workCenters' => WorkCenter::active()->get(),
         ]);
     }
 
@@ -48,13 +54,14 @@ class LaporanHarianController extends Controller
             abort(403, 'Manager hanya bisa read-only.');
         }
         $produks = Produk::aktif()->get();
-        $mesins = Mesin::aktif()->get();
+        $mesins = Mesin::aktif()->with('workCenter')->get();
         $lines = Line::aktif()->get();
         $alasanDowntimes = AlasanDowntime::aktif()->get();
-        $weeklyPlans = WeeklyPlan::with(['produk', 'line'])
+        $weeklyPlans = WeeklyPlan::with(['produk', 'line', 'workCenter'])
             ->whereIn('status', ['aktif', 'draft'])
             ->where('mo_status', '!=', WeeklyPlan::MO_STATUS_CANCELLED)
             ->get();
+        $workCenters = WorkCenter::active()->get();
 
         return Inertia::render('Leader/LaporanHarian/Create', [
             'produks' => $produks,
@@ -62,10 +69,12 @@ class LaporanHarianController extends Controller
             'lines' => $lines,
             'alasanDowntimes' => $alasanDowntimes,
             'weeklyPlans' => $weeklyPlans,
+            'workCenters' => $workCenters,
             'preselect' => [
                 'produk_id' => $request->input('produk_id'),
                 'weekly_plan_id' => $request->input('weekly_plan_id'),
                 'proses' => $request->input('proses'),
+                'work_center_id' => $request->input('work_center_id'),
             ],
         ]);
     }
@@ -74,7 +83,7 @@ class LaporanHarianController extends Controller
     {
         $request->validate(['tanggal' => 'required|date']);
 
-        $plans = WeeklyPlan::with(['produk', 'line'])
+        $plans = WeeklyPlan::with(['produk', 'line', 'workCenter'])
             ->where('tanggal', $request->tanggal)
             ->whereIn('status', ['aktif', 'draft'])
             ->where('mo_status', '!=', WeeklyPlan::MO_STATUS_CANCELLED)
@@ -93,6 +102,7 @@ class LaporanHarianController extends Controller
             'weekly_plan_id' => 'required|exists:weekly_plans,id',
             'mesin_id' => 'required|exists:mesins,id',
             'line_id' => 'required|exists:lines,id',
+            'work_center_id' => 'required|exists:work_centers,id',
             'tanggal' => 'required|date',
             'shift' => 'nullable|in:shift1,shift2',
             'target_mp' => 'required|numeric|min:0',
@@ -107,7 +117,6 @@ class LaporanHarianController extends Controller
         }
 
         // Cegah duplikasi: 1 weekly plan (produk+proses+batch+tanggal) hanya boleh 1 laporan
-        // Termasuk soft-deleted? cek hanya yang belum dihapus agar laporan yang dihapus bisa dibuat ulang
         $existingLaporan = LaporanHarian::where('weekly_plan_id', $weeklyPlan->id)->exists();
         if ($existingLaporan) {
             return back()->withErrors([
@@ -117,6 +126,7 @@ class LaporanHarianController extends Controller
         }
 
         $mesin = Mesin::findOrFail($validated['mesin_id']);
+        $workCenter = WorkCenter::findOrFail($validated['work_center_id']);
 
         // Create laporan with timer_status='start', calculations happen on endTimer
         $laporan = LaporanHarian::create([
@@ -126,8 +136,9 @@ class LaporanHarianController extends Controller
             'proses' => $weeklyPlan->proses,
             'batch_number' => $weeklyPlan->batch_number,
             'mesin_id' => $validated['mesin_id'],
-            'ct' => $mesin->ct,
+            'ct' => $mesin->effective_ct,
             'line_id' => $validated['line_id'],
+            'work_center_id' => $validated['work_center_id'],
             'tanggal' => $validated['tanggal'],
             'shift' => $validated['shift'] ?? 'shift1',
             'target_mp' => $validated['target_mp'],
@@ -135,6 +146,7 @@ class LaporanHarianController extends Controller
             'capacity_fisik' => $validated['capacity_fisik'],
             'timer_status' => 'draft',
             'status' => 'draft',
+            'quality_method' => 'auto',
         ]);
 
         return redirect()->route('leader.laporan-harian.show', $laporan->id)
@@ -148,25 +160,25 @@ class LaporanHarianController extends Controller
             return back()->withErrors(['error' => 'Anda tidak memiliki akses ke laporan ini']);
         }
 
-        $laporanHarian->load(['produk', 'mesin', 'line', 'user', 'downtimeDetails.alasanDowntime']);
+        $laporanHarian->load(['produk', 'mesin', 'line', 'user', 'workCenter', 'downtimeDetails.alasanDowntime']);
 
         $alasanDowntimes = AlasanDowntime::aktif()->get();
 
         // Get sibling laporans: same produk + same tanggal (parallel processes)
-        $siblingLaporans = LaporanHarian::with(['produk', 'mesin', 'line', 'downtimeDetails.alasanDowntime'])
+        $siblingLaporans = LaporanHarian::with(['produk', 'mesin', 'line', 'workCenter', 'downtimeDetails.alasanDowntime'])
             ->where('produk_id', $laporanHarian->produk_id)
             ->where('tanggal', $laporanHarian->tanggal)
             ->where('id', '!=', $laporanHarian->id)
             ->get();
 
         // Get all weekly plans for this product + date (for next process lookup)
-        $weeklyPlans = WeeklyPlan::with('produk')
+        $weeklyPlans = WeeklyPlan::with(['produk', 'workCenter'])
             ->where('produk_id', $laporanHarian->produk_id)
             ->where('tanggal', $laporanHarian->tanggal)
             ->where('status', 'aktif')
             ->get();
 
-        $mesins = Mesin::aktif()->get();
+        $mesins = Mesin::aktif()->with('workCenter')->get();
         $lines = Line::aktif()->get();
 
         $totalReject = $laporanHarian->rejectDetails()->sum('jumlah');
@@ -199,7 +211,7 @@ class LaporanHarianController extends Controller
         $laporanHarian->load(['downtimeDetails.alasanDowntime']);
 
         $produks = Produk::aktif()->get();
-        $mesins = Mesin::aktif()->get();
+        $mesins = Mesin::aktif()->with('workCenter')->get();
         $lines = Line::aktif()->get();
         $alasanDowntimes = AlasanDowntime::aktif()->get();
 
@@ -234,6 +246,7 @@ class LaporanHarianController extends Controller
             'weekly_plan_id' => 'required|exists:weekly_plans,id',
             'mesin_id' => 'required|exists:mesins,id',
             'line_id' => 'required|exists:lines,id',
+            'work_center_id' => 'required|exists:work_centers,id',
             'tanggal' => 'required|date',
             'shift' => 'nullable|in:shift1,shift2',
             'target_mp' => 'required|numeric|min:0',
@@ -242,10 +255,13 @@ class LaporanHarianController extends Controller
             'end_time' => 'required|date_format:H:i',
             'capacity_fisik' => 'required|integer|min:0',
             'output_fisik' => 'required|integer|min:0|lte:capacity_fisik',
+            'quality_input_persen' => 'nullable|numeric|min:0|max:100',
+            'quality_method' => 'nullable|in:auto,manual',
         ]);
 
         $weeklyPlan = WeeklyPlan::findOrFail($validated['weekly_plan_id']);
         $mesin = Mesin::findOrFail($validated['mesin_id']);
+        $workCenter = WorkCenter::findOrFail($validated['work_center_id']);
 
         // Calculate Gross Time (handles overnight shifts)
         $startMinutes = $this->timeToMinutes($validated['start_time']);
@@ -270,11 +286,14 @@ class LaporanHarianController extends Controller
         $totalOutput = $validated['output_fisik'] + $totalReject;
 
         $availability = $grossTimeMenit > 0 ? min(100, ($waktuBersih / $grossTimeMenit) * 100) : 0;
-        $performance = $waktuBersih > 0 ? min(100, ($validated['output_fisik'] * $mesin->ct / $waktuBersih) * 100) : 0;
+        $performance = $waktuBersih > 0 ? min(100, ($validated['output_fisik'] * $mesin->effective_ct / $waktuBersih) * 100) : 0;
         $quality = $totalOutput > 0 ? min(100, ($validated['output_fisik'] / $totalOutput) * 100) : 0;
         $oee = min(100, ($availability / 100) * ($performance / 100) * ($quality / 100) * 100);
         $targetTotal = $validated['target_mp'] * $validated['total_mp'];
         $produktivitas = $targetTotal > 0 ? ($validated['output_fisik'] / $targetTotal) * 100 : 0;
+
+        $qualityInput = $validated['quality_input_persen'] ?? null;
+        $qualityMethod = $validated['quality_method'] ?? 'auto';
 
         $laporanHarian->update([
             'weekly_plan_id' => $weeklyPlan->id,
@@ -282,8 +301,9 @@ class LaporanHarianController extends Controller
             'proses' => $weeklyPlan->proses,
             'batch_number' => $weeklyPlan->batch_number,
             'mesin_id' => $validated['mesin_id'],
-            'ct' => $mesin->ct,
+            'ct' => $mesin->effective_ct,
             'line_id' => $validated['line_id'],
+            'work_center_id' => $validated['work_center_id'],
             'tanggal' => $validated['tanggal'],
             'shift' => $validated['shift'] ?? $laporanHarian->shift ?? 'shift1',
             'target_mp' => $validated['target_mp'],
@@ -294,13 +314,15 @@ class LaporanHarianController extends Controller
             'capacity_fisik' => $validated['capacity_fisik'],
             'output_fisik' => $validated['output_fisik'],
             'waktu_bersih_menit' => $waktuBersih,
-            'target_teoritis' => $waktuBersih * $mesin->ct,
+            'target_teoritis' => $waktuBersih * $mesin->effective_ct,
             'yield_persen' => $quality,
             'availability_persen' => $availability,
             'performance_persen' => $performance,
             'oee_persen' => $oee,
             'produktivitas_persen' => $produktivitas,
             'status' => 'submitted',
+            'quality_input_persen' => $qualityInput,
+            'quality_method' => $qualityMethod,
         ]);
 
         return redirect()->route('leader.laporan-harian.index')
@@ -360,7 +382,7 @@ class LaporanHarianController extends Controller
         }
 
         // Dependency check: filling must wait for mixing to be finished (End or Submitted)
-        $processOrder = ['mixing' => 0, 'filling' => 1, 'packing' => 2];
+        $processOrder = ['mixing' => 0, 'filling' => 1, 'secondary' => 2];
         $currentOrder = $processOrder[$laporanHarian->proses] ?? -1;
         if ($currentOrder > 0) {
             $prevProses = array_search($currentOrder - 1, $processOrder);
@@ -521,12 +543,14 @@ class LaporanHarianController extends Controller
                 'mesin_id' => $laporanHarian->mesin_id,
                 'ct' => $laporanHarian->ct,
                 'line_id' => $laporanHarian->line_id,
+                'work_center_id' => $laporanHarian->work_center_id,
                 'tanggal' => $laporanHarian->tanggal,
                 'target_mp' => $laporanHarian->target_mp,
                 'total_mp' => $laporanHarian->total_mp,
                 'capacity_fisik' => $laporanHarian->capacity_fisik,
                 'timer_status' => 'draft',
                 'status' => 'draft',
+                'quality_method' => 'auto',
             ]);
         }
 
@@ -559,6 +583,8 @@ class LaporanHarianController extends Controller
             'line_id' => 'nullable|exists:lines,id',
             'target_mp' => 'nullable|numeric|min:0',
             'total_mp' => 'nullable|integer|min:1',
+            'quality_input_persen' => 'nullable|numeric|min:0|max:100',
+            'quality_method' => 'nullable|in:auto,manual',
         ]);
 
         $mesinId = $validated['mesin_id'] ?? $laporanHarian->mesin_id;
@@ -584,32 +610,59 @@ class LaporanHarianController extends Controller
         $totalOutput = $outputFisik + $totalReject;
 
         $availability = $grossTimeMenit > 0 ? min(100, ($waktuBersih / $grossTimeMenit) * 100) : 0;
-        $performance = $waktuBersih > 0 ? min(100, ($outputFisik * $mesin->ct / $waktuBersih) * 100) : 0;
+        $performance = $waktuBersih > 0 ? min(100, ($outputFisik * $mesin->effective_ct / $waktuBersih) * 100) : 0;
         $quality = $totalOutput > 0 ? min(100, ($outputFisik / $totalOutput) * 100) : 0;
         $oee = min(100, ($availability / 100) * ($performance / 100) * ($quality / 100) * 100);
         $targetTotal = $targetMp * $totalMp;
         $produktivitas = $targetTotal > 0 ? min(999.99, ($outputFisik / $targetTotal) * 100) : 0;
 
+        $qualityInput = $validated['quality_input_persen'] ?? null;
+        $qualityMethod = $validated['quality_method'] ?? 'auto';
+
         $laporanHarian->update([
             'mesin_id' => $mesinId,
-            'ct' => $mesin->ct,
+            'ct' => $mesin->effective_ct,
             'line_id' => $lineId,
             'target_mp' => $targetMp,
             'total_mp' => $totalMp,
             'capacity_fisik' => $capacityFisik,
             'output_fisik' => $outputFisik,
             'waktu_bersih_menit' => $waktuBersih,
-            'target_teoritis' => $waktuBersih * $mesin->ct,
+            'target_teoritis' => $waktuBersih * $mesin->effective_ct,
             'yield_persen' => $quality,
             'availability_persen' => $availability,
             'performance_persen' => $performance,
             'oee_persen' => $oee,
             'produktivitas_persen' => $produktivitas,
             'status' => 'submitted',
+            'quality_input_persen' => $qualityInput,
+            'quality_method' => $qualityMethod,
         ]);
 
         return redirect()->route('leader.laporan-harian.show', $laporanHarian->id)
             ->with('success', 'Laporan harian berhasil dikirim');
+    }
+
+    public function updateQuality(Request $request, LaporanHarian $laporanHarian)
+    {
+        if (! auth()->user()->hasAnyRole(['spv', 'manager', 'superadmin', 'admin'])) {
+            abort(403, 'Hanya SPV/Manager/Admin yang bisa mengubah Quality %');
+        }
+
+        if ($laporanHarian->status !== 'submitted' && $laporanHarian->status !== 'locked') {
+            return back()->withErrors(['error' => 'Quality hanya bisa diubah setelah laporan disubmit']);
+        }
+
+        $validated = $request->validate([
+            'quality_input_persen' => 'required|numeric|min:0|max:100',
+        ]);
+
+        $laporanHarian->update([
+            'quality_input_persen' => $validated['quality_input_persen'],
+            'quality_method' => 'manual',
+        ]);
+
+        return redirect()->back()->with('success', 'Quality % berhasil diperbarui');
     }
 
     private function timeToMinutes(string $time): int
@@ -618,4 +671,4 @@ class LaporanHarianController extends Controller
 
         return (int) $parts[0] * 60 + (int) $parts[1];
     }
-}
+};

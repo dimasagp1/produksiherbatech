@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class LaporanHarian extends Model
@@ -19,6 +21,7 @@ class LaporanHarian extends Model
         'mesin_id',
         'ct',
         'line_id',
+        'work_center_id',
         'tanggal',
         'shift',
         'target_mp',
@@ -42,6 +45,8 @@ class LaporanHarian extends Model
         'timer_status',
         'pause_started_at',
         'total_pause_menit',
+        'quality_input_persen',
+        'quality_method',
     ];
 
     protected $casts = [
@@ -65,44 +70,50 @@ class LaporanHarian extends Model
         'pause_started_at' => 'datetime',
         'start_time_at' => 'datetime',
         'total_pause_menit' => 'float',
+        'quality_input_persen' => 'float',
     ];
 
-    public function user()
+    public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    public function weeklyPlan()
+    public function weeklyPlan(): BelongsTo
     {
         return $this->belongsTo(WeeklyPlan::class);
     }
 
-    public function produk()
+    public function produk(): BelongsTo
     {
         return $this->belongsTo(Produk::class);
     }
 
-    public function mesin()
+    public function mesin(): BelongsTo
     {
         return $this->belongsTo(Mesin::class);
     }
 
-    public function line()
+    public function line(): BelongsTo
     {
         return $this->belongsTo(Line::class);
     }
 
-    public function locker()
+    public function workCenter(): BelongsTo
+    {
+        return $this->belongsTo(WorkCenter::class);
+    }
+
+    public function locker(): BelongsTo
     {
         return $this->belongsTo(User::class, 'locked_by');
     }
 
-    public function downtimeDetails()
+    public function downtimeDetails(): HasMany
     {
         return $this->hasMany(DowntimeDetail::class);
     }
 
-    public function rejectDetails()
+    public function rejectDetails(): HasMany
     {
         return $this->hasMany(RejectDetail::class);
     }
@@ -132,6 +143,11 @@ class LaporanHarian extends Model
         return $query->where('line_id', $lineId);
     }
 
+    public function scopeForWorkCenter($query, $workCenterId)
+    {
+        return $query->where('work_center_id', $workCenterId);
+    }
+
     public function scopeForProduk($query, $produkId)
     {
         return $query->where('produk_id', $produkId);
@@ -157,4 +173,12 @@ class LaporanHarian extends Model
         return $query->whereYear('tanggal', $year)
             ->whereMonth('tanggal', $month);
     }
-}
+
+    public function getEffectiveQualityAttribute(): float
+    {
+        if ($this->quality_method === 'manual' && $this->quality_input_persen !== null) {
+            return $this->quality_input_persen;
+        }
+        return $this->yield_persen;
+    }
+};

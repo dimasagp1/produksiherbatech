@@ -23,5 +23,26 @@ class SettingSeeder extends Seeder
             ['key' => 'odoo_seed_enabled'],
             ['value' => '0', 'group' => 'odoo']
         );
+
+        // Phase 1 - Work Center & Quality settings
+        Setting::firstOrCreate(
+            ['key' => 'shift_hours'],
+            ['value' => '6.5', 'group' => 'production']
+        );
+
+        Setting::firstOrCreate(
+            ['key' => 'mo_status_filter'],
+            ['value' => 'confirmed,progress,in_progress', 'group' => 'odoo']
+        );
+
+        Setting::firstOrCreate(
+            ['key' => 'use_work_center'],
+            ['value' => '1', 'group' => 'production']
+        );
+
+        Setting::firstOrCreate(
+            ['key' => 'quality_input_method'],
+            ['value' => 'auto', 'group' => 'production']
+        );
     }
-}
+};

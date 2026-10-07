@@ -106,6 +106,9 @@ const alasanDowntime = ref('');
 // Output fisik for current laporan
 const outputFisik = ref<string>(String(props.laporan.output_fisik ?? ''));
 
+// Quality input for post-sync override
+const qualityInput = ref<string>('');
+
 // Timer display for current
 const timerDisplay = computed(() => {
     const h = Math.floor(timerElapsed.value / 3600);
@@ -466,6 +469,23 @@ function submitLaporan() {
         capacity_fisik:
             Number(capacityFisik.value) || props.laporan.capacity_fisik,
         output_fisik: Number(outputFisik.value) || 0,
+    });
+}
+
+function updateQuality() {
+    const q = parseFloat(qualityInput.value);
+    if (isNaN(q) || q < 0 || q > 100) {
+        alert('Quality % harus antara 0-100');
+        return;
+    }
+    
+    router.post(route('leader.laporan-harian.update-quality', props.laporan.id), {
+        quality_input_persen: q,
+    }, {
+        onSuccess: () => {
+            qualityInput.value = '';
+            window.location.reload();
+        }
     });
 }
 
@@ -1823,6 +1843,43 @@ function laporanTimerLabel(l: Laporan) {
                                 Isi Output Fisik terlebih dahulu, lalu klik
                                 Kirim.
                             </p>
+                        </div>
+
+                        <!-- Quality % Input (Post-Sync) - only for SPV/Manager/Admin -->
+                        <div
+                            v-if="
+                                laporan.status === 'submitted' ||
+                                laporan.status === 'locked'
+                            "
+                            class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700"
+                        >
+                            <div class="flex flex-col gap-2">
+                                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    Quality % (Manual Override)
+                                    <span class="text-xs text-gray-400"> — Default: {{ laporan.yield_persen?.toFixed(1) ?? '-' }}%</span>
+                                </label>
+                                <div class="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        v-model="qualityInput"
+                                        min="0"
+                                        max="100"
+                                        step="0.1"
+                                        class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                                        placeholder="Masukkan Quality % (0-100)"
+                                    />
+                                    <PrimaryButton
+                                        @click="updateQuality"
+                                        class="whitespace-nowrap"
+                                        :disabled="!qualityInput || parseFloat(qualityInput) < 0 || parseFloat(qualityInput) > 100"
+                                    >
+                                        Simpan Quality
+                                    </PrimaryButton>
+                                </div>
+                                <p class="text-xs text-gray-500">
+                                    Override Quality % (auto: {{ laporan.yield_persen?.toFixed(1) ?? '-' }}%). Hanya untuk SPV/Manager/Admin.
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </div>

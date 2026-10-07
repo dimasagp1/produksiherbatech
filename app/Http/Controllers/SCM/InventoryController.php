@@ -76,7 +76,6 @@ class InventoryController extends Controller
                 'usage_variance' => round($totalUsageVariance, 3),
                 'total_standard' => round($totalStandard, 3),
                 'loss_ratio' => $lossRatio,
-                // Revenue 0 jika belum ada SO — tampilkan qty saja (PRD B12)
                 'revenue' => 0,
             ],
             'uoms' => ScmUom::all(['id', 'code', 'name']),
@@ -208,4 +207,27 @@ class InventoryController extends Controller
             return back()->with('error', 'Gagal sync Saldo Stok Odoo: '.$e->getMessage());
         }
     }
-}
+
+    /**
+     * Snapshot Beginning Stock (monthly baseline) - triggers Odoo syncBeginningStock
+     */
+    public function snapshotBeginningStock(Request $request, OdooService $odooService)
+    {
+        if (! auth()->user()->hasAnyRole(['warehouse_admin', 'superadmin', 'admin'])) {
+            abort(403, 'Hanya warehouse_admin/admin/superadmin yang bisa snapshot beginning stock.');
+        }
+
+        try {
+            $summary = $odooService->syncBeginningStock();
+
+            $message = "Snapshot Beginning Stock selesai: {$summary['created']} baru, {$summary['updated']} diperbarui.";
+            if (! empty($summary['errors'])) {
+                $message .= ' Error: '.implode(', ', $summary['errors']);
+            }
+
+            return back()->with('success', $message);
+        } catch (\Exception $e) {
+            return back()->with('error', 'Gagal snapshot Beginning Stock: '.$e->getMessage());
+        }
+    }
+};

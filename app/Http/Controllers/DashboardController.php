@@ -9,6 +9,7 @@ use App\Models\Mesin;
 use App\Models\Produk;
 use App\Models\RejectDetail;
 use App\Models\WeeklyPlan;
+use App\Models\WorkCenter;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -28,20 +29,32 @@ class DashboardController extends Controller
         $selectedShift = $request->input('shift');
         $shiftValid = in_array($selectedShift, ['shift1', 'shift2'], true);
 
-        $currentPlan = WeeklyPlan::with(['produk'])
+        $workCenterId = $request->input('work_center_id');
+        $viewMode = $request->input('view_mode', 'live'); // 'live' | 'post_sync'
+
+        $currentPlan = WeeklyPlan::with(['produk', 'workCenter'])
             ->where('tanggal', $selectedDate)
             ->where('status', 'aktif')
             ->first();
 
-        // Laporan for selected date — leader only own, with reject sum
-        $todayLaporans = LaporanHarian::with(['produk', 'line', 'user', 'mesin'])
+        // Base query for laporans
+        $baseQuery = LaporanHarian::with(['produk', 'line', 'user', 'mesin', 'workCenter'])
             ->withSum('rejectDetails as total_reject', 'jumlah')
-            ->where('tanggal', $selectedDate)
-            ->when($shiftValid, fn ($q) => $q->where('shift', $selectedShift))
+            ->where('tanggal', $selectedDate);
+
+        // For post_sync view, filter by odoo_synced_at date
+        if ($viewMode === 'post_sync') {
+            $baseQuery->whereNotNull('odoo_synced_at')
+                ->whereDate('odoo_synced_at', $selectedDate);
+        }
+
+        $baseQuery->when($shiftValid, fn ($q) => $q->where('shift', $selectedShift))
+            ->when($workCenterId, fn ($q, $wc) => $q->where('work_center_id', $wc))
             ->when($user->hasAnyRole(['leader', 'operator']), function ($query) use ($user) {
                 return $query->where('user_id', $user->id);
-            })
-            ->get();
+            });
+
+        $todayLaporans = $baseQuery->get();
 
         // enrich sisa & available for detail
         $todayLaporans->each(function ($l) {
@@ -49,12 +62,12 @@ class DashboardController extends Controller
             $avail = $l->output_fisik ?? $l->capacity_fisik ?? 0;
             $l->available_qty = (int) $avail;
             $l->sisa_qty = max(0, $l->available_qty - $l->total_reject);
-            // also load jenis list for detail (first jenis or dominant)
             $l->reject_jenis = $l->rejectDetails->groupBy('jenis_reject')->map->sum('jumlah')->sortDesc()->keys()->first() ?? null;
         });
 
+        // KPI Aggregations
         $avgOee = $todayLaporans->avg('oee_persen') ?? 0;
-        $avgYield = $todayLaporans->avg('yield_persen') ?? 0;
+        $avgYield = $todayLaporans->avg('effective_quality') ?? $todayLaporans->avg('yield_persen') ?? 0;
         $avgProduktivitas = $todayLaporans->avg('produktivitas_persen') ?? 0;
         $totalGross = $todayLaporans->sum('gross_time_menit');
         $totalWaktuBersih = $todayLaporans->sum('waktu_bersih_menit');
@@ -66,6 +79,7 @@ class DashboardController extends Controller
         $todayLaporansWithDowntime = LaporanHarian::with(['downtimeDetails.alasanDowntime'])
             ->where('tanggal', $selectedDate)
             ->when($shiftValid, fn ($q) => $q->where('shift', $selectedShift))
+            ->when($workCenterId, fn ($q, $wc) => $q->where('work_center_id', $wc))
             ->when($user->hasRole('leader'), fn ($q) => $q->where('user_id', $user->id))
             ->get();
         $downtimePareto = $todayLaporansWithDowntime->flatMap(fn ($l) => $l->downtimeDetails)
@@ -74,14 +88,14 @@ class DashboardController extends Controller
             ->map(fn ($group) => $group->sum('durasi_menit'))
             ->sortDesc();
 
-        // Heat grid
-        $lines = Line::aktif()->get()->pluck('nama_line');
-        $prosesList = ['mixing', 'filling', 'packing'];
+        // Heat grid - now grouped by Work Center
+        $workCenters = WorkCenter::active()->get()->pluck('name', 'id');
+        $prosesList = ['mixing', 'filling', 'secondary'];
         $heatData = [];
-        foreach ($lines as $ln) {
+        foreach ($workCenters as $wcId => $wcName) {
             foreach ($prosesList as $ps) {
-                $val = $todayLaporans->filter(fn ($l) => ($l->line?->nama_line === $ln) && $l->proses === $ps)->sum('output_fisik');
-                $heatData[$ln][$ps] = (int) $val;
+                $val = $todayLaporans->filter(fn ($l) => ($l->work_center_id == $wcId) && $l->proses === $ps)->sum('output_fisik');
+                $heatData[$wcName][$ps] = (int) $val;
             }
         }
 
@@ -97,7 +111,7 @@ class DashboardController extends Controller
                 ];
             });
 
-        // Monitoring by produk — enriched with total_reject
+        // Monitoring by produk
         $monitoringByProduk = $todayLaporans
             ->groupBy('produk_id')
             ->map(function ($group) {
@@ -110,7 +124,7 @@ class DashboardController extends Controller
                 ];
             });
 
-        // Batch breakdown — enriched with reject & sisa
+        // Batch breakdown
         $batchBreakdown = $todayLaporans
             ->groupBy('batch_number')
             ->map(function ($group) {
@@ -123,6 +137,7 @@ class DashboardController extends Controller
                     'batch_number' => $first->batch_number,
                     'produk' => $first->produk->nama_produk ?? '-',
                     'proses' => $first->proses ?? '-',
+                    'work_center' => $first->workCenter->name ?? '-',
                     'total_output' => $totalOutput,
                     'oee' => $group->avg('oee_persen'),
                     'yield' => $group->avg('yield_persen'),
@@ -139,15 +154,16 @@ class DashboardController extends Controller
             ->when($user->hasRole('leader'), fn ($q) => $q->where('user_id', $user->id));
         $monthlyOutput = $monthlyQuery->groupBy('month')->pluck('total', 'month')->toArray();
 
-        // ===== 5 P0/P1 REJECT INTEGRATION =====
+        // Reject stats
         $totalOutputForRate = $todayLaporans->sum('output_fisik');
         $totalReject = (int) $todayLaporans->sum('total_reject');
         $rejectRate = $totalOutputForRate > 0 ? round(($totalReject / $totalOutputForRate) * 100, 2) : 0;
 
-        // Reject by jenis (sublayer/ga/process) for selectedDate
-        $rejectByJenis = RejectDetail::whereHas('laporanHarian', function ($q) use ($selectedDate, $user) {
+        // Reject by jenis
+        $rejectByJenis = RejectDetail::whereHas('laporanHarian', function ($q) use ($selectedDate, $user, $workCenterId) {
             $q->where('tanggal', $selectedDate)
-                ->when($user->hasRole('leader'), fn ($qq) => $qq->where('user_id', $user->id));
+                ->when($user->hasRole('leader'), fn ($qq) => $qq->where('user_id', $user->id))
+                ->when($workCenterId, fn ($qq, $wc) => $qq->where('work_center_id', $wc));
         })
             ->selectRaw('jenis_reject, SUM(jumlah) as total')
             ->groupBy('jenis_reject')
@@ -155,17 +171,18 @@ class DashboardController extends Controller
             ->map(fn ($v) => (int) $v)
             ->toArray();
 
-        // Reject by produk for selectedDate
+        // Reject by produk
         $rejectByProdukRaw = RejectDetail::with('laporanHarian.produk')
-            ->whereHas('laporanHarian', function ($q) use ($selectedDate, $user) {
+            ->whereHas('laporanHarian', function ($q) use ($selectedDate, $user, $workCenterId) {
                 $q->where('tanggal', $selectedDate)
-                    ->when($user->hasRole('leader'), fn ($qq) => $qq->where('user_id', $user->id));
+                    ->when($user->hasRole('leader'), fn ($qq) => $qq->where('user_id', $user->id))
+                    ->when($workCenterId, fn ($qq, $wc) => $qq->where('work_center_id', $wc));
             })->get();
         $rejectByProduk = $rejectByProdukRaw->groupBy(fn ($r) => $r->laporanHarian->produk->nama_produk ?? '-')
             ->map(fn ($g) => (int) $g->sum('jumlah'))
             ->toArray();
 
-        // Monthly reject (same year, same scope as monthlyOutput)
+        // Monthly reject
         $monthlyReject = RejectDetail::whereHas('laporanHarian', function ($q) use ($user) {
             $q->whereYear('tanggal', now()->year)
                 ->whereIn('status', ['submitted', 'locked'])
@@ -194,6 +211,7 @@ class DashboardController extends Controller
                 'produk_total' => Produk::count(),
                 'mesin' => Mesin::aktif()->count(),
                 'line' => Line::aktif()->count(),
+                'work_center' => WorkCenter::active()->count(),
                 'alasan_downtime' => AlasanDowntime::aktif()->count(),
             ];
         }
@@ -221,6 +239,9 @@ class DashboardController extends Controller
             'selectedDate' => $selectedDate,
             'selectedShift' => $shiftValid ? $selectedShift : null,
             'isLive' => $isLive,
+            'viewMode' => $viewMode,
+            'workCenterId' => $workCenterId,
+            'workCenters' => WorkCenter::active()->get(),
             'thresholds' => $thresholds,
             'kpis' => [
                 'oee' => round($avgOee, 2),
@@ -237,7 +258,7 @@ class DashboardController extends Controller
             'monthlyReject' => $monthlyReject,
             'downtimePareto' => $downtimePareto,
             'heatData' => $heatData,
-            'heatLines' => $lines,
+            'heatLines' => $workCenters,
             'monitoringByProses' => $monitoringByProses,
             'monitoringByProduk' => $monitoringByProduk,
             'batchBreakdown' => $batchBreakdown,
@@ -251,7 +272,8 @@ class DashboardController extends Controller
                 'batch' => $todayLaporans->first()->batch_number ?? $currentPlan?->batch_number ?? '-',
                 'line' => $todayLaporans->first()->line->nama_line ?? '-',
                 'mesin' => $todayLaporans->first()->mesin->nama_mesin ?? '-',
+                'work_center' => $todayLaporans->first()->workCenter->name ?? '-',
             ] : null,
         ]);
     }
-}
+};

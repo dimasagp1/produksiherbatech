@@ -6,6 +6,8 @@ use App\Models\Line;
 use App\Models\Produk;
 use App\Models\Setting;
 use App\Models\WeeklyPlan;
+use App\Models\WorkCenter;
+use App\Services\TargetCalculationService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -13,17 +15,19 @@ class WeeklyPlanController extends Controller
 {
     public function index()
     {
-        $weeklyPlans = WeeklyPlan::with(['produk', 'creator', 'line'])
+        $weeklyPlans = WeeklyPlan::with(['produk', 'creator', 'line', 'workCenter'])
             ->boardVisible()
             ->latest('tanggal')
             ->get();
 
         $produks = Produk::aktif()->get();
+        $workCenters = WorkCenter::active()->get();
 
         return Inertia::render('PPIC/WeeklyPlan/Index', [
             'weeklyPlans' => $weeklyPlans,
             'produks' => $produks,
             'lines' => Line::aktif()->get(),
+            'workCenters' => $workCenters,
             'targetOutputMultiplier' => (int) Setting::get('target_output_multiplier', 2000),
         ]);
     }
@@ -33,7 +37,8 @@ class WeeklyPlanController extends Controller
         $validated = $request->validate([
             'produk_id' => 'required|exists:produks,id',
             'line_id' => 'nullable|exists:lines,id',
-            'proses' => 'required|in:mixing,filling,packing',
+            'work_center_id' => 'required|exists:work_centers,id',
+            'proses' => 'required|in:mixing,filling,secondary',
             'batch_number' => 'required|string|max:255',
             'tanggal' => 'required|date',
             'mp_count' => 'nullable|integer|min:0',
@@ -42,7 +47,7 @@ class WeeklyPlanController extends Controller
             'mo_status' => 'nullable|string',
         ]);
 
-        // Audit gap: process chain Mixing → Filling → Packing harus urut
+        // Audit gap: process chain Mixing → Filling → Secondary harus urut
         $processOrder = WeeklyPlan::processOrderMap();
         $currentOrder = $processOrder[$validated['proses']] ?? -1;
         if ($currentOrder > 0) {
@@ -65,16 +70,17 @@ class WeeklyPlanController extends Controller
             ->where('status', 'draft')
             ->first();
 
-        $multiplier = (int) Setting::get('target_output_multiplier', 2000);
+        $workCenter = WorkCenter::findOrFail($validated['work_center_id']);
         $mpCount = (int) ($validated['mp_count'] ?? 0);
         $targetOutput = ! empty($validated['target_output'])
             ? (int) $validated['target_output']
-            : ($existingDraft?->target_output ?: ($mpCount * $multiplier));
+            : ($existingDraft?->target_output ?: TargetCalculationService::calculateTarget($workCenter, $mpCount));
 
         if ($existingDraft && $existingDraft->tanggal !== $validated['tanggal']) {
             $existingDraft->update([
                 'tanggal' => $validated['tanggal'],
                 'line_id' => $validated['line_id'] ?? null,
+                'work_center_id' => $validated['work_center_id'],
                 'proses' => $validated['proses'],
                 'mp_count' => $mpCount,
                 'target_output' => $targetOutput,
@@ -93,7 +99,7 @@ class WeeklyPlanController extends Controller
             return back()->withErrors(['batch_number' => 'Batch number sudah digunakan pada tanggal tersebut.']);
         }
 
-        // Validasi: produk + tanggal maksimal 3 proses (mixing+filling+packing) — hitung draft+aktif, ignore soft-deleted & selesai
+        // Validasi: produk + tanggal maksimal 3 proses (mixing+filling+secondary) — hitung draft+aktif, ignore soft-deleted & selesai
         $existingCount = WeeklyPlan::where('produk_id', $validated['produk_id'])
             ->where('tanggal', $validated['tanggal'])
             ->whereIn('status', ['draft', 'aktif'])
@@ -114,7 +120,7 @@ class WeeklyPlanController extends Controller
 
         $validated['created_by'] = auth()->id();
         $validated['mp_count'] = $mpCount;
-        $validated['multiplier'] = $multiplier;
+        $validated['multiplier'] = $workCenter->fit_mp ?: 1;
         $validated['line_id'] = $validated['line_id'] ?? null;
         $validated['mo_status'] = $validated['mo_status'] ?? WeeklyPlan::MO_STATUS_PENDING;
         $validated['target_output'] = $targetOutput;
@@ -139,7 +145,8 @@ class WeeklyPlanController extends Controller
         $validated = $request->validate([
             'produk_id' => 'required|exists:produks,id',
             'line_id' => 'nullable|exists:lines,id',
-            'proses' => 'required|in:mixing,filling,packing',
+            'work_center_id' => 'nullable|exists:work_centers,id',
+            'proses' => 'required|in:mixing,filling,secondary',
             'batch_number' => 'required|string|max:255',
             'tanggal' => 'required|date',
             'mp_count' => 'nullable|integer|min:0',
@@ -159,8 +166,9 @@ class WeeklyPlanController extends Controller
         // Validasi max 3 jika produk/tanggal/proses berubah — exclude diri sendiri
         $isSameProdukTanggal = $validated['produk_id'] == $weeklyPlan->produk_id && $validated['tanggal'] == $weeklyPlan->tanggal;
         $isSameProses = $validated['proses'] == $weeklyPlan->proses;
+        $isSameWorkCenter = ($validated['work_center_id'] ?? null) == ($weeklyPlan->work_center_id ?? null);
 
-        if (! $isSameProdukTanggal || ! $isSameProses) {
+        if (! $isSameProdukTanggal || ! $isSameProses || ! $isSameWorkCenter) {
             $existingCount = WeeklyPlan::where('produk_id', $validated['produk_id'])
                 ->where('tanggal', $validated['tanggal'])
                 ->whereIn('status', ['draft', 'aktif'])
@@ -182,7 +190,18 @@ class WeeklyPlanController extends Controller
         }
 
         $validated['mp_count'] = (int) ($validated['mp_count'] ?? $weeklyPlan->mp_count ?? 0);
-        if (array_key_exists('target_output', $validated) && ! $validated['target_output'] && $validated['mp_count'] > 0) {
+
+        // Auto-calculate target_output using Work Center CT if work_center_id provided
+        if (isset($validated['work_center_id']) && $validated['work_center_id']) {
+            $wc = WorkCenter::find($validated['work_center_id']);
+            if ($wc) {
+                if (! isset($validated['target_output']) || ! $validated['target_output']) {
+                    $validated['target_output'] = TargetCalculationService::calculateTarget($wc, $validated['mp_count']);
+                }
+                $validated['multiplier'] = $wc->fit_mp ?: 1;
+            }
+        } elseif (array_key_exists('target_output', $validated) && ! $validated['target_output'] && $validated['mp_count'] > 0) {
+            // Fallback to old multiplier
             $validated['target_output'] = $validated['mp_count'] * (int) Setting::get('target_output_multiplier', 2000);
         }
 
@@ -200,30 +219,44 @@ class WeeklyPlanController extends Controller
         $rules = [
             'mp_count' => 'sometimes|nullable|integer|min:0',
             'line_id' => 'sometimes|nullable|exists:lines,id',
+            'work_center_id' => 'sometimes|nullable|exists:work_centers,id',
             'packing_hold' => 'sometimes|boolean',
             'target_output' => 'sometimes|nullable|integer|min:0',
         ];
 
         // Packing hold: plan packing boleh digeser tanggal
-        if ($weeklyPlan->proses === 'packing') {
+        if ($weeklyPlan->proses === 'secondary') {
             $rules['tanggal'] = 'sometimes|date';
         }
 
         $validated = $request->validate($rules);
 
-        $multiplier = (int) Setting::get('target_output_multiplier', 2000);
-
+        // Auto-calculate target_output using Work Center CT if mp_count changed
         if (array_key_exists('mp_count', $validated)
             && $validated['mp_count'] !== null
             && ! array_key_exists('target_output', $validated)
             && (int) $validated['mp_count'] !== (int) $weeklyPlan->mp_count) {
-            $validated['target_output'] = (int) $validated['mp_count'] * $multiplier;
+            $wc = $weeklyPlan->workCenter;
+            if ($wc) {
+                $validated['target_output'] = TargetCalculationService::calculateTarget($wc, (int) $validated['mp_count']);
+            }
         }
 
         if (array_key_exists('target_output', $validated)
             && ! $validated['target_output']
             && (int) $weeklyPlan->mp_count > 0) {
-            $validated['target_output'] = (int) $weeklyPlan->mp_count * $multiplier;
+            $wc = $weeklyPlan->workCenter;
+            if ($wc) {
+                $validated['target_output'] = TargetCalculationService::calculateTarget($wc, $weeklyPlan->mp_count);
+            }
+        }
+
+        // Recalculate multiplier if work_center_id changed
+        if (array_key_exists('work_center_id', $validated) && $validated['work_center_id']) {
+            $wc = WorkCenter::find($validated['work_center_id']);
+            if ($wc) {
+                $validated['multiplier'] = $wc->fit_mp ?: 1;
+            }
         }
 
         $weeklyPlan->update($validated);
@@ -250,14 +283,21 @@ class WeeklyPlanController extends Controller
             return back()->withErrors(['error' => 'Hanya plan draft yang bisa diaktifkan']);
         }
 
-        $multiplier = (int) Setting::get('target_output_multiplier', 2000);
         $data = ['status' => 'aktif'];
 
         if (! $weeklyPlan->target_output) {
-            $data['multiplier'] = $multiplier;
-            $data['target_output'] = (int) $weeklyPlan->mp_count * $multiplier;
+            $wc = $weeklyPlan->workCenter;
+            if ($wc) {
+                $data['multiplier'] = $wc->fit_mp ?: 1;
+                $data['target_output'] = TargetCalculationService::calculateTarget($wc, $weeklyPlan->mp_count);
+            } else {
+                $multiplier = (int) Setting::get('target_output_multiplier', 2000);
+                $data['multiplier'] = $multiplier;
+                $data['target_output'] = (int) $weeklyPlan->mp_count * $multiplier;
+            }
         } elseif (! $weeklyPlan->multiplier) {
-            $data['multiplier'] = $multiplier;
+            $wc = $weeklyPlan->workCenter;
+            $data['multiplier'] = $wc?->fit_mp ?: 1;
         }
 
         $weeklyPlan->update($data);
@@ -271,7 +311,7 @@ class WeeklyPlanController extends Controller
         $produkId = $request->input('produk_id');
         $tanggal = $request->input('tanggal', now()->toDateString());
 
-        $weeklyPlan = WeeklyPlan::with(['produk'])
+        $weeklyPlan = WeeklyPlan::with(['produk', 'workCenter'])
             ->where('produk_id', $produkId)
             ->where('tanggal', $tanggal)
             ->where('status', 'aktif')
@@ -279,4 +319,23 @@ class WeeklyPlanController extends Controller
 
         return response()->json($weeklyPlan);
     }
-}
+
+    public function targetPreview(Request $request)
+    {
+        $request->validate([
+            'work_center_id' => 'required|exists:work_centers,id',
+            'mp_count' => 'required|integer|min:0',
+        ]);
+
+        $workCenter = WorkCenter::findOrFail($request->work_center_id);
+        $mpCount = (int) $request->mp_count;
+
+        $target = TargetCalculationService::calculateTarget($workCenter, $mpCount);
+        $capacityInfo = TargetCalculationService::getCapacityInfo($workCenter);
+
+        return response()->json([
+            'target_output' => $target,
+            'capacity_info' => $capacityInfo,
+        ]);
+    }
+};

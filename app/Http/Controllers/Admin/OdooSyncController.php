@@ -192,11 +192,9 @@ class OdooSyncController extends Controller
             $unlinkedCount = 0;
 
             foreach ($odooProducts as $produk) {
-                // Check if product is used in transactions
                 $isUsed = $produk->laporanHarians()->exists() || $produk->weeklyPlans()->exists();
 
                 if ($isUsed) {
-                    // Unlink instead of delete so historical transactions stay valid
                     $produk->update([
                         'odoo_id' => null,
                         'odoo_synced_at' => null,
@@ -208,7 +206,6 @@ class OdooSyncController extends Controller
                 }
             }
 
-            // Also clean up any soft-deleted products with odoo_id
             Produk::onlyTrashed()->whereNotNull('odoo_id')->forceDelete();
 
             $message = "Reset produk Odoo berhasil! {$deletedCount} produk dihapus".($unlinkedCount > 0 ? " dan {$unlinkedCount} produk dilepas tautan Odoo (karena memiliki data transaksi)." : '.');
@@ -256,4 +253,124 @@ class OdooSyncController extends Controller
             ], 500);
         }
     }
-}
+
+    /**
+     * Preview Work Centers from Odoo
+     */
+    public function previewWorkCenters(OdooService $odooService)
+    {
+        try {
+            $odooService->reloadConfig();
+            $workCenters = $odooService->fetchWorkCenters();
+
+            return response()->json([
+                'success' => true,
+                'work_centers' => $workCenters,
+                'count' => count($workCenters),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil Work Center dari Odoo: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Sync Work Centers from Odoo
+     */
+    public function syncWorkCenters(Request $request, OdooService $odooService)
+    {
+        if (auth()->user()->hasRole('manager')) {
+            abort(403, 'Manager hanya memiliki akses baca.');
+        }
+
+        try {
+            $odooService->reloadConfig();
+            $odooWorkCenters = $odooService->fetchWorkCenters();
+
+            $created = 0;
+            $updated = 0;
+            $errors = [];
+
+            foreach ($odooWorkCenters as $wc) {
+                try {
+                    $code = $wc['code'] ?? 'WC-'.$wc['id'];
+                    $type = $this->mapOdooWorkCenterType($wc['name']);
+
+                    $workCenter = \App\Models\WorkCenter::updateOrCreate(
+                        ['code' => $code],
+                        [
+                            'name' => $wc['name'],
+                            'type' => $type,
+                            'standard_ct_seconds' => 0, // Will be set manually
+                            'fit_mp' => 0, // Will be set manually
+                            'shift_hours' => 6.5,
+                            'is_active' => true,
+                        ]
+                    );
+
+                    if ($workCenter->wasRecentlyCreated) {
+                        $created++;
+                    } else {
+                        $updated++;
+                    }
+                } catch (\Exception $e) {
+                    $errors[] = "Work Center {$wc['name']}: ".$e->getMessage();
+                }
+            }
+
+            $message = "Sync Work Center selesai: {$created} dibuat, {$updated} diperbarui.";
+            if (! empty($errors)) {
+                $message .= ' Error: '.implode(', ', $errors);
+            }
+
+            return back()->with('success', $message);
+        } catch (\Exception $e) {
+            return back()->with('error', 'Gagal sync Work Center: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Sync Beginning Stock (Stock On Hand) from Odoo
+     */
+    public function syncBeginningStock(Request $request, OdooService $odooService)
+    {
+        if (auth()->user()->hasRole('manager')) {
+            abort(403, 'Manager hanya memiliki akses baca.');
+        }
+
+        try {
+            $odooService->reloadConfig();
+            $summary = $odooService->syncBeginningStock();
+
+            $message = "Sync Beginning Stock selesai: {$summary['created']} baru, {$summary['updated']} diperbarui.";
+            if (! empty($summary['errors'])) {
+                $message .= ' Error: '.implode(', ', $summary['errors']);
+            }
+
+            return back()->with('success', $message);
+        } catch (\Exception $e) {
+            return back()->with('error', 'Gagal sync Beginning Stock: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Map Odoo work center name to local type
+     */
+    private function mapOdooWorkCenterType(string $name): string
+    {
+        $lower = strtolower($name);
+        if (str_contains($lower, 'mixing') || str_contains($lower, 'mix') || str_contains($lower, 'aduk')) {
+            return 'mixing';
+        }
+        if (str_contains($lower, 'filling') || str_contains($lower, 'isi') || str_contains($lower, 'fill')) {
+            return 'filling';
+        }
+        if (str_contains($lower, 'packing') || str_contains($lower, 'kemas') || str_contains($lower, 'secondary') || str_contains($lower, 'sekunder') || str_contains($lower, 'label') || str_contains($lower, 'carton')) {
+            return 'secondary';
+        }
+
+        return 'secondary';
+    }
+};

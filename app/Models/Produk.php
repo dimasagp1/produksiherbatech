@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Produk extends Model
@@ -24,6 +26,8 @@ class Produk extends Model
         'odoo_uom',
         'status_aktif',
         'odoo_synced_at',
+        'ct_seconds',
+        'work_center_id',
     ];
 
     protected $casts = [
@@ -32,29 +36,35 @@ class Produk extends Model
         'safety_stock' => 'float',
         'min_stock' => 'float',
         'max_stock' => 'float',
+        'ct_seconds' => 'integer',
     ];
 
-    public function weeklyPlans()
+    public function weeklyPlans(): HasMany
     {
         return $this->hasMany(WeeklyPlan::class);
     }
 
-    public function laporanHarians()
+    public function laporanHarians(): HasMany
     {
         return $this->hasMany(LaporanHarian::class);
     }
 
-    public function category()
+    public function category(): BelongsTo
     {
         return $this->belongsTo(ScmCategory::class, 'category_id');
     }
 
-    public function uom()
+    public function uom(): BelongsTo
     {
         return $this->belongsTo(ScmUom::class, 'uom_id');
     }
 
-    public function inventoryStocks()
+    public function workCenter(): BelongsTo
+    {
+        return $this->belongsTo(WorkCenter::class);
+    }
+
+    public function inventoryStocks(): HasMany
     {
         return $this->hasMany(InventoryStock::class);
     }
@@ -63,4 +73,9 @@ class Produk extends Model
     {
         return $query->where('status_aktif', true);
     }
-}
+
+    public function getEffectiveCtAttribute(): int
+    {
+        return $this->ct_seconds ?? $this->workCenter?->standard_ct_seconds ?? 0;
+    }
+};

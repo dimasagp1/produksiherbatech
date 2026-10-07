@@ -2,11 +2,19 @@
 import { computed } from 'vue';
 import BatchCard, { type BoardPlan } from './components/BatchCard.vue';
 
+interface WorkCenter {
+    id: number;
+    code: string;
+    name: string;
+    type: 'mixing' | 'filling' | 'secondary';
+}
+
 const props = withDefaults(
     defineProps<{
         plans: BoardPlan[];
         multiplier: number;
         startDate?: Date;
+        workCenters?: WorkCenter[];
     }>(),
     {
         startDate: () => new Date(),
@@ -113,6 +121,7 @@ const plansByDate = computed(() => {
                     :key="plan.id"
                     :plan="plan"
                     :multiplier="multiplier"
+                    :workCenters="workCenters"
                     @activate="emit('activate', $event)"
                     @toggle-hold="emit('toggle-hold', $event)"
                     @edit="emit('edit', $event)"

@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             SettingSeeder::class,
             ScmMasterSeeder::class,
             MasterDataSeeder::class,
+            WorkCenterSeeder::class,
             // ProdukSeeder::class, // Dinonaktifkan agar menggunakan produk Odoo ERP
         ]);
 
@@ -93,4 +94,4 @@ class DatabaseSeeder extends Seeder
             LaporanHarianSeeder::class,
         ]);
     }
-}
+};

@@ -561,14 +561,14 @@ class OdooService
     }
 
     /**
-     * Fetch Manufacturing Orders (mrp.production) from Odoo (strictly confirmed status for planning).
+     * Fetch Manufacturing Orders (mrp.production) from Odoo (confirmed + in_progress for planning).
      *
      * @return array<int, array<string, mixed>>
      */
     public function fetchManufacturingOrders(array $domain = [], int $limit = 5000): array
     {
         $domain = $domain !== [] ? $domain : [
-            ['state', '=', 'confirmed'],
+            ['state', 'in', ['confirmed', 'progress', 'in_progress']],
         ];
 
         return $this->searchRead('mrp.production', $domain, [
@@ -2196,6 +2196,108 @@ class OdooService
             }
         } catch (Exception $e) {
             $summary['errors'][] = 'BOM Sync Error: '.$e->getMessage();
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Fetch Beginning Stock (Stock On Hand) from Odoo for all products.
+     * Used for monthly baseline snapshot.
+     *
+     * @return array<int, array{odoo_id:int, qty_available:float}>
+     */
+    public function fetchBeginningStock(): array
+    {
+        $products = $this->searchRead('product.product', [['active', '=', true]], [
+            'id', 'qty_available',
+        ], 10000);
+
+        $result = [];
+        foreach ($products as $p) {
+            $oid = (int) ($p['id'] ?? 0);
+            if ($oid > 0) {
+                $result[$oid] = (float) ($p['qty_available'] ?? 0);
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Fetch Work Centers from Odoo (mrp.workcenter).
+     *
+     * @return array<int, array{id:int, name:string, code:string|null, time_efficiency:float, capacity:float}>
+     */
+    public function fetchWorkCenters(): array
+    {
+        try {
+            $centers = $this->searchRead('mrp.workcenter', [['active', '=', true]], [
+                'id', 'name', 'code', 'time_efficiency', 'capacity', 'resource_calendar_id',
+            ], 1000);
+
+            return array_map(function ($c) {
+                return [
+                    'id' => (int) ($c['id'] ?? 0),
+                    'name' => (string) ($c['name'] ?? ''),
+                    'code' => is_array($c['code'] ?? null) ? ($c['code'][1] ?? null) : ($c['code'] ?? null),
+                    'time_efficiency' => (float) ($c['time_efficiency'] ?? 100) / 100,
+                    'capacity' => (float) ($c['capacity'] ?? 1),
+                    'calendar_id' => is_array($c['resource_calendar_id'] ?? null) ? ($c['resource_calendar_id'][0] ?? null) : ($c['resource_calendar_id'] ?? null),
+                ];
+            }, $centers);
+        } catch (\Exception $e) {
+            \Log::warning('Failed to fetch Work Centers from Odoo', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
+
+    /**
+     * Sync Beginning Stock from Odoo to local InventoryStock (monthly snapshot).
+     *
+     * @return array{updated:int, created:int, errors:array<int,string>}
+     */
+    public function syncBeginningStock(): array
+    {
+        $summary = ['updated' => 0, 'created' => 0, 'errors' => []];
+
+        try {
+            $odooStocks = $this->fetchBeginningStock();
+            $snapshotDate = now()->startOfMonth()->toDateString();
+
+            foreach ($odooStocks as $odooId => $qty) {
+                try {
+                    $produk = Produk::where('odoo_id', $odooId)->first();
+                    if (! $produk) {
+                        continue;
+                    }
+
+                    $stock = InventoryStock::updateOrCreate(
+                        [
+                            'produk_id' => $produk->id,
+                            'location' => 'GUDANG-UTAMA',
+                            'batch_number' => null,
+                        ],
+                        [
+                            'quantity' => $qty,
+                            'beginning_stock_monthly' => $qty,
+                            'snapshot_date' => $snapshotDate,
+                            'is_baseline' => true,
+                            'expired_date' => null,
+                        ]
+                    );
+
+                    if ($stock->wasRecentlyCreated) {
+                        $summary['created']++;
+                    } else {
+                        $summary['updated']++;
+                    }
+                } catch (\Exception $e) {
+                    $summary['errors'][] = "Produk Odoo ID {$odooId}: {$e->getMessage()}";
+                }
+            }
+        } catch (\Exception $e) {
+            $summary['errors'][] = 'Beginning Stock Sync: '.$e->getMessage();
         }
 
         return $summary;

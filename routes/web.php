@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\FinanceSettingController;
 use App\Http\Controllers\Admin\HistoryController;
 use App\Http\Controllers\Admin\HrisSettingController;
 use App\Http\Controllers\Admin\OdooSyncController;
+use App\Http\Controllers\Admin\WorkCenterController;
 use App\Http\Controllers\AlasanDowntimeController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LaporanHarianController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\SCM\MaterialScrapController;
 use App\Http\Controllers\SCM\MaterialUsageController;
 use App\Http\Controllers\SCM\OdooMoSyncController;
 use App\Http\Controllers\SCM\StockOpnameController;
+use App\Http\Controllers\SCM\SupplyController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WeeklyPlanController;
 use Illuminate\Support\Facades\Route;
@@ -54,6 +56,11 @@ Route::middleware(['auth', 'role:superadmin|admin|ppic|manager'])->prefix('admin
     Route::post('odoo/test-connection', [OdooSyncController::class, 'testConnection'])->name('odoo.test-connection');
     Route::get('odoo/test-connection', [OdooSyncController::class, 'testConnection']);
 
+    // Odoo Work Center & Beginning Stock Sync
+    Route::get('odoo/preview-work-centers', [OdooSyncController::class, 'previewWorkCenters'])->name('odoo.preview-work-centers');
+    Route::post('odoo/sync-work-centers', [OdooSyncController::class, 'syncWorkCenters'])->name('odoo.sync-work-centers');
+    Route::post('odoo/sync-beginning-stock', [OdooSyncController::class, 'syncBeginningStock'])->name('odoo.sync-beginning-stock');
+
     // HRIS Sasaran Mutu Integration Settings
     Route::get('settings/hris', [HrisSettingController::class, 'index'])->name('settings.hris.index');
     Route::post('settings/hris', [HrisSettingController::class, 'update'])->name('settings.hris.update');
@@ -77,6 +84,7 @@ Route::middleware(['auth', 'role:superadmin|admin|manager'])->prefix('admin')->n
     Route::resource('users', UserController::class);
     Route::patch('users/{user}/toggle-active', [UserController::class, 'toggleActive'])->name('users.toggle-active');
     Route::get('/history', [HistoryController::class, 'index'])->name('history.index');
+    Route::resource('work-center', WorkCenterController::class);
 });
 
 // PPIC routes - Weekly Plan / WPS
@@ -86,6 +94,7 @@ Route::middleware(['auth', 'role:ppic|superadmin'])->prefix('ppic')->name('ppic.
     Route::put('/weekly-plan/{weeklyPlan}', [WeeklyPlanController::class, 'update'])->name('weekly-plan.update');
     Route::delete('/weekly-plan/{weeklyPlan}', [WeeklyPlanController::class, 'destroy'])->name('weekly-plan.destroy');
     Route::post('/weekly-plan/{weeklyPlan}/activate', [WeeklyPlanController::class, 'activate'])->name('weekly-plan.activate');
+    Route::post('/weekly-plan/target-preview', [WeeklyPlanController::class, 'targetPreview'])->name('weekly-plan.target-preview');
     // Odoo MO sync (manual button)
     Route::post('/odoo/mo-sync', [OdooMoSyncController::class, 'sync'])->name('odoo.mo-sync');
     Route::get('/odoo/mo-list', [OdooMoSyncController::class, 'moList'])->name('odoo.mo-list');
@@ -126,6 +135,7 @@ Route::middleware(['auth', 'role:warehouse_admin|manager|superadmin|admin|ppic']
     Route::post('/saldo-stok/adjust', [InventoryController::class, 'adjust'])->name('saldo-stok.adjust');
     Route::get('/saldo-stok/preview-odoo', [InventoryController::class, 'previewOdoo'])->name('saldo-stok.preview-odoo');
     Route::post('/saldo-stok/sync-odoo', [InventoryController::class, 'syncFromOdoo'])->name('saldo-stok.sync-odoo');
+    Route::post('/saldo-stok/snapshot-beginning', [InventoryController::class, 'snapshotBeginningStock'])->name('saldo-stok.snapshot-beginning');
     Route::get('/materials', [InventoryController::class, 'materials'])->name('materials');
 });
 
@@ -181,6 +191,7 @@ Route::middleware(['auth', 'role:leader|operator|spv|superadmin|admin|manager'])
     Route::put('/laporan-harian/{laporanHarian}', [LaporanHarianController::class, 'update'])->name('laporan-harian.update');
     Route::delete('/laporan-harian/{laporanHarian}', [LaporanHarianController::class, 'destroy'])->name('laporan-harian.destroy');
     Route::post('/laporan-harian/{laporanHarian}/lock', [LaporanHarianController::class, 'lock'])->name('laporan-harian.lock');
+    Route::post('/laporan-harian/{laporanHarian}/update-quality', [LaporanHarianController::class, 'updateQuality'])->name('laporan-harian.update-quality');
     // Timer actions
     Route::post('/laporan-harian/{laporanHarian}/timer/start', [LaporanHarianController::class, 'startTimer'])->name('laporan-harian.timer.start');
     Route::post('/laporan-harian/{laporanHarian}/timer/pause', [LaporanHarianController::class, 'pauseTimer'])->name('laporan-harian.timer.pause');

@@ -17,6 +17,7 @@ interface Mesin {
     id: number;
     nama_mesin: string;
     ct: number;
+    work_center_id?: number | null;
 }
 interface Line {
     id: number;
@@ -42,14 +43,22 @@ interface WeeklyPlan {
     mp_count?: number;
     multiplier?: number;
     line_id?: number | null;
+    work_center_id?: number | null;
     produk?: Produk;
     line?: Line | null;
+}
+interface WorkCenter {
+    id: number;
+    code: string;
+    name: string;
+    type: 'mixing' | 'filling' | 'secondary';
 }
 
 const props = defineProps<{
     produks: Produk[];
     mesins: Mesin[];
     lines: Line[];
+    workCenters: WorkCenter[];
     alasanDowntimes: AlasanDowntime[];
     weeklyPlans: WeeklyPlan[];
     preselect?: {
@@ -62,6 +71,7 @@ const props = defineProps<{
 const form = useForm({
     produk_id: '',
     weekly_plan_id: '',
+    work_center_id: '',
     proses: '',
     batch_number: '',
     mesin_id: '',
@@ -118,12 +128,14 @@ function applyWeeklyPlan(wp: WeeklyPlan | null) {
         form.weekly_plan_id = '';
         form.proses = '';
         form.batch_number = '';
+        form.work_center_id = '';
         return;
     }
 
     form.weekly_plan_id = String(wp.id);
     form.proses = wp.proses;
     form.batch_number = wp.batch_number;
+    form.work_center_id = wp.work_center_id ? String(wp.work_center_id) : '';
 
     if (wp.line_id) {
         form.line_id = String(wp.line_id);
@@ -230,6 +242,12 @@ watch(
 );
 
 const ct = computed(() => selectedMesin.value?.ct ?? 0);
+
+// Filter mesin by selected work_center_id
+const filteredMesins = computed(() => {
+    if (!form.work_center_id) return props.mesins;
+    return props.mesins.filter(m => m.work_center_id === Number(form.work_center_id));
+});
 
 // Handle preselect from query params (parallel flow redirect)
 onMounted(() => {
@@ -503,9 +521,33 @@ function submit() {
                         <h3
                             class="mb-4 text-sm font-semibold uppercase text-gray-500 dark:text-gray-400"
                         >
-                            Mesin & Line
+                            Work Center, Mesin & Line
                         </h3>
-                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-4">
+                            <div>
+                                <InputLabel value="Work Center" />
+                                <select
+                                    v-model="form.work_center_id"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+                                    required
+                                >
+                                    <option value="" disabled>Pilih Work Center</option>
+                                    <optgroup
+                                        v-for="type in ['mixing', 'filling', 'secondary']"
+                                        :key="type"
+                                        :label="type === 'mixing' ? 'Mixing' : type === 'filling' ? 'Filling' : 'Secondary'"
+                                    >
+                                        <option
+                                            v-for="wc in workCenters.filter(w => w.type === type && w.is_active)"
+                                            :key="wc.id"
+                                            :value="wc.id"
+                                        >
+                                            {{ wc.code }} - {{ wc.name }} (CT: {{ wc.standard_ct_seconds }}s, MP: {{ wc.fit_mp }})
+                                        </option>
+                                    </optgroup>
+                                </select>
+                                <InputError :message="form.errors.work_center_id" class="mt-1" />
+                            </div>
                             <div>
                                 <InputLabel value="Mesin" />
                                 <select
@@ -513,21 +555,16 @@ function submit() {
                                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                                     required
                                 >
-                                    <option value="" disabled>
-                                        Pilih Mesin
-                                    </option>
+                                    <option value="" disabled>Pilih Mesin</option>
                                     <option
-                                        v-for="m in mesins"
+                                        v-for="m in filteredMesins"
                                         :key="m.id"
                                         :value="m.id"
                                     >
-                                        {{ m.nama_mesin }}
+                                        {{ m.nama_mesin }} (CT: {{ m.ct }})
                                     </option>
                                 </select>
-                                <InputError
-                                    :message="form.errors.mesin_id"
-                                    class="mt-1"
-                                />
+                                <InputError :message="form.errors.mesin_id" class="mt-1" />
                             </div>
                             <div>
                                 <InputLabel value="CT (menit)" />
@@ -544,9 +581,7 @@ function submit() {
                                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                                     required
                                 >
-                                    <option value="" disabled>
-                                        Pilih Line
-                                    </option>
+                                    <option value="" disabled>Pilih Line</option>
                                     <option
                                         v-for="l in lines"
                                         :key="l.id"
@@ -555,10 +590,7 @@ function submit() {
                                         {{ l.nama_line }}
                                     </option>
                                 </select>
-                                <InputError
-                                    :message="form.errors.line_id"
-                                    class="mt-1"
-                                />
+                                <InputError :message="form.errors.line_id" class="mt-1" />
                             </div>
                         </div>
                     </div>

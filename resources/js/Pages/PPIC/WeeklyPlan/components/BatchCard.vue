@@ -16,6 +16,7 @@ export interface BoardPlan {
     id: number;
     produk_id: number;
     line_id?: number | null;
+    work_center_id?: number | null;
     proses: string;
     batch_number: string;
     odoo_mo_id?: number | null;
@@ -28,11 +29,25 @@ export interface BoardPlan {
     status: string;
     produk?: Produk;
     line?: Line | null;
+    workCenter?: {
+        id: number;
+        code: string;
+        name: string;
+        type: 'mixing' | 'filling' | 'secondary';
+    };
+}
+
+interface WorkCenter {
+    id: number;
+    code: string;
+    name: string;
+    type: 'mixing' | 'filling' | 'secondary';
 }
 
 const props = defineProps<{
     plan: BoardPlan;
     multiplier: number;
+    workCenters?: WorkCenter[];
 }>();
 
 const emit = defineEmits<{
@@ -41,11 +56,11 @@ const emit = defineEmits<{
     (e: 'edit', plan: BoardPlan): void;
 }>();
 
-const prosesColor: Record<string, string> = {
+const typeColor: Record<string, string> = {
     mixing: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
     filling:
-        'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-    packing:
+        'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200',
+    secondary:
         'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
 };
 
@@ -64,6 +79,18 @@ const moColor: Record<string, string> = {
     cancelled: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
 };
 
+const typeIcon: Record<string, string> = {
+    mixing: '🥣',
+    filling: '🥤',
+    secondary: '📦',
+};
+
+const typeLabel: Record<string, string> = {
+    mixing: 'Mixing',
+    filling: 'Filling',
+    secondary: 'Secondary',
+};
+
 const targetDisplay = computed(() => {
     const mp = props.plan.mp_count ?? 0;
     const mult = props.plan.multiplier || props.multiplier;
@@ -71,6 +98,22 @@ const targetDisplay = computed(() => {
         return props.plan.target_output;
     return mp * mult;
 });
+
+const workCenter = computed(() => {
+    if (props.plan.workCenter) return props.plan.workCenter;
+    if (props.workCenters && props.plan.work_center_id) {
+        return props.workCenters.find(wc => wc.id === props.plan.work_center_id);
+    }
+    return null;
+});
+
+const wcType = computed(() => workCenter.value?.type ?? props.plan.proses);
+
+const prosesColor: Record<string, string> = {
+    mixing: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+    filling: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200',
+    secondary: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+};
 </script>
 
 <template>
@@ -79,18 +122,29 @@ const targetDisplay = computed(() => {
     >
         <div class="flex items-center justify-between gap-1">
             <span
+                v-if="workCenter"
+                :class="[
+                    'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold',
+                    typeColor[wcType],
+                ]"
+            >
+                <span>{{ typeIcon[wcType] }}</span>
+                {{ typeLabel[wcType] }}
+            </span>
+            <span
+                v-else
                 :class="[
                     'rounded px-1.5 py-0.5 text-[10px] font-bold capitalize',
                     prosesColor[plan.proses],
                 ]"
-                >{{ plan.proses }}</span
+            >{{ plan.proses }}</span
             >
             <span
                 :class="[
                     'rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase',
                     statusColor[plan.status] ?? 'bg-gray-100 text-gray-800',
                 ]"
-                >{{ plan.status }}</span
+            >{{ plan.status }}</span
             >
         </div>
         <p class="mt-1.5 text-xs font-bold text-gray-900 dark:text-gray-100">

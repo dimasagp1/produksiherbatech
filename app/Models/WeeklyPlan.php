@@ -2,8 +2,11 @@
 
 namespace App\Models;
 
+use App\Services\TargetCalculationService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class WeeklyPlan extends Model
@@ -11,18 +14,15 @@ class WeeklyPlan extends Model
     use HasFactory, SoftDeletes;
 
     public const MO_STATUS_PENDING = 'pending';
-
     public const MO_STATUS_CONFIRMED = 'confirmed';
-
     public const MO_STATUS_IN_PROGRESS = 'in_progress';
-
     public const MO_STATUS_DONE = 'done';
-
     public const MO_STATUS_CANCELLED = 'cancelled';
 
     protected $fillable = [
         'produk_id',
         'line_id',
+        'work_center_id',
         'proses',
         'batch_number',
         'odoo_mo_id',
@@ -46,22 +46,27 @@ class WeeklyPlan extends Model
         'packing_hold' => 'boolean',
     ];
 
-    public function produk()
+    public function produk(): BelongsTo
     {
         return $this->belongsTo(Produk::class);
     }
 
-    public function line()
+    public function line(): BelongsTo
     {
         return $this->belongsTo(Line::class);
     }
 
-    public function creator()
+    public function workCenter(): BelongsTo
+    {
+        return $this->belongsTo(WorkCenter::class);
+    }
+
+    public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
     }
 
-    public function laporanHarians()
+    public function laporanHarians(): HasMany
     {
         return $this->hasMany(LaporanHarian::class);
     }
@@ -79,6 +84,11 @@ class WeeklyPlan extends Model
     public function scopeForProduk($query, $produkId)
     {
         return $query->where('produk_id', $produkId);
+    }
+
+    public function scopeForWorkCenter($query, $workCenterId)
+    {
+        return $query->where('work_center_id', $workCenterId);
     }
 
     public function scopeBoardVisible($query)
@@ -101,6 +111,7 @@ class WeeklyPlan extends Model
             'tanggal',
             'batch_number',
             'produk_id',
+            'work_center_id',
         ]));
 
         if ($allowed !== []) {
@@ -108,21 +119,33 @@ class WeeklyPlan extends Model
         }
     }
 
-    public function computeTargetOutput(?int $defaultMultiplier = null): int
+    /**
+     * Compute target output using Work Center CT-based formula.
+     * Formula: (60 / CT_seconds) * 60 * shift_hours * mp_count
+     */
+    public function computeTargetOutput(?int $defaultMpCount = null): int
     {
         if ($this->target_output > 0) {
             return (int) $this->target_output;
         }
 
-        $multiplier = $this->multiplier ?: ($defaultMultiplier ?? (int) Setting::get('target_output_multiplier', 2000));
+        if (! $this->workCenter) {
+            $fallbackMultiplier = $this->multiplier ?: (int) Setting::get('target_output_multiplier', 2000);
+            return (int) ($this->mp_count ?? $defaultMpCount ?? 0) * $fallbackMultiplier;
+        }
 
-        return (int) $this->mp_count * (int) $multiplier;
+        $mpCount = $this->mp_count ?? $defaultMpCount ?? 0;
+        if ($mpCount <= 0) {
+            return 0;
+        }
+
+        return TargetCalculationService::calculateTarget($this->workCenter, $mpCount);
     }
 
     /**
-     * Process order: mixing → filling → packing
+     * Process order: mixing → filling → secondary (packing)
      */
-    private static array $processOrder = ['mixing' => 0, 'filling' => 1, 'packing' => 2];
+    private static array $processOrder = ['mixing' => 0, 'filling' => 1, 'secondary' => 2];
 
     /**
      * Find the next process weekly plan for same product + same date
@@ -152,4 +175,4 @@ class WeeklyPlan extends Model
     {
         return $this->laporanHarians()->exists();
     }
-}
+};

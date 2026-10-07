@@ -62,7 +62,7 @@ class MaterialUsageController extends Controller
 
     public function create()
     {
-        $plans = WeeklyPlan::with(['produk.uom', 'line'])
+        $plans = WeeklyPlan::with(['produk.uom', 'line', 'workCenter'])
             ->whereIn('status', ['aktif', 'draft'])
             ->latest('tanggal')
             ->limit(50)
@@ -180,13 +180,28 @@ class MaterialUsageController extends Controller
             'items.uom',
             'weeklyPlan.produk.uom',
             'weeklyPlan.line',
+            'weeklyPlan.workCenter',
             'user',
         ]);
 
         $parentProdName = $materialUsage->weeklyPlan?->produk?->nama_produk;
         $targetOutput = (float) ($materialUsage->weeklyPlan?->target_output ?: 1.0);
+        $odooMoId = $materialUsage->weeklyPlan?->odoo_mo_id;
 
-        $items = $materialUsage->items->map(function ($item) use ($odooService, $parentProdName, $targetOutput) {
+        // Fetch Odoo actual usage from stock.move for this MO
+        $odooActualUsage = [];
+        if ($odooMoId) {
+            try {
+                $odooActualUsage = $this->fetchOdooActualUsage($odooService, $odooMoId, $parentProdName, $targetOutput);
+            } catch (\Throwable $e) {
+                \Log::warning('Failed to fetch Odoo actual usage', ['mo_id' => $odooMoId, 'error' => $e->getMessage()]);
+            }
+        }
+
+        // Map Odoo actual by material name for quick lookup
+        $odooActualByName = collect($odooActualUsage)->keyBy('material_name');
+
+        $items = $materialUsage->items->map(function ($item) use ($odooService, $parentProdName, $targetOutput, $odooActualByName) {
             $ratio = $item->quantity_standard > 0
                 ? (($item->quantity_used - $item->quantity_standard) / $item->quantity_standard) * 100
                 : null;
@@ -214,6 +229,16 @@ class MaterialUsageController extends Controller
 
             $itemType = $isPm ? 'pm' : ($isPrimerOrRuahan ? 'wip' : 'rm');
 
+            // Get Odoo actual for this material
+            $odooActual = $odooActualByName->get($itemName);
+            $odooActualQty = $odooActual['quantity_used'] ?? null;
+            $odooVariance = $odooActualQty !== null && $item->quantity_standard > 0
+                ? round(($odooActualQty - $item->quantity_standard) / $item->quantity_standard * 100, 2)
+                : null;
+            $localVsOdooVariance = $odooActualQty !== null
+                ? round(($item->quantity_used - $odooActualQty) / $odooActualQty * 100, 2)
+                : null;
+
             return [
                 ...$item->toArray(),
                 'item_type' => $itemType,
@@ -221,6 +246,9 @@ class MaterialUsageController extends Controller
                 'uom_code' => $item->uom?->code ?? $item->produk?->uom?->code ?? $item->produk?->odoo_uom ?? 'Pcs',
                 'ratio_persen' => $ratio !== null ? round($ratio, 2) : null,
                 'recipe_breakdown' => $breakdown,
+                'odoo_actual_qty' => $odooActualQty,
+                'odoo_variance_persen' => $odooVariance,
+                'local_vs_odoo_variance_persen' => $localVsOdooVariance,
             ];
         });
 
@@ -250,6 +278,10 @@ class MaterialUsageController extends Controller
         $rmEfficientCount = $rmItems->filter(fn ($it) => (float) ($it['variance'] ?? 0) <= 0)->count();
         $pmEfficientCount = $pmItems->filter(fn ($it) => (float) ($it['variance'] ?? 0) <= 0)->count();
 
+        // Odoo actual summary
+        $totalOdooActual = array_sum(array_column($odooActualUsage, 'quantity_used'));
+        $totalOdooVariance = $totalStandard > 0 ? round(($totalOdooActual - $totalStandard) / $totalStandard * 100, 2) : null;
+
         return Inertia::render('SCM/Inventory/MaterialUsage/Show', [
             'usage' => $materialUsage,
             'items' => $items,
@@ -268,8 +300,49 @@ class MaterialUsageController extends Controller
                 'total_used' => round($totalUsed, 4),
                 'total_variance' => round($totalVariance, 4),
                 'overall_ratio' => $overallRatio,
+                'total_odoo_actual' => round($totalOdooActual, 4),
+                'total_odoo_variance_persen' => $totalOdooVariance,
             ],
         ]);
+    }
+
+    /**
+     * Fetch actual material usage from Odoo stock.move for a given MO
+     */
+    private function fetchOdooActualUsage(OdooService $odooService, int $odooMoId, string $parentProdName, float $targetOutput): array
+    {
+        $moves = $odooService->searchRead('stock.move', [
+            ['raw_material_production_id', '=', $odooMoId],
+            ['state', 'in', ['done', 'progress']],
+        ], [
+            'id', 'product_id', 'quantity', 'product_uom_qty', 'product_uom', 'date',
+        ], 1000);
+
+        if (empty($moves)) {
+            return [];
+        }
+
+        $items = [];
+        foreach ($moves as $m) {
+            $matName = is_array($m['product_id'] ?? null) ? $m['product_id'][1] : 'Material';
+            $matOdooId = is_array($m['product_id'] ?? null) ? (int) $m['product_id'][0] : null;
+            $qtyUsed = (float) ($m['quantity'] ?? $m['product_uom_qty'] ?? 0);
+            $uomName = is_array($m['product_uom'] ?? null) ? $m['product_uom'][1] : null;
+
+            // Check if we already have this material (aggregate if multiple moves)
+            if (isset($items[$matName])) {
+                $items[$matName]['quantity_used'] += $qtyUsed;
+            } else {
+                $items[$matName] = [
+                    'material_name' => $matName,
+                    'odoo_product_id' => $matOdooId,
+                    'quantity_used' => $qtyUsed,
+                    'uom' => $uomName,
+                ];
+            }
+        }
+
+        return array_values($items);
     }
 
     /**
@@ -376,4 +449,4 @@ class MaterialUsageController extends Controller
             return back()->with('error', 'Gagal sync Material Usage Odoo: '.$e->getMessage());
         }
     }
-}
+};

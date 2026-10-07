@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Mesin extends Model
@@ -14,6 +16,7 @@ class Mesin extends Model
         'nama_mesin',
         'ct',
         'status_aktif',
+        'work_center_id',
     ];
 
     protected $casts = [
@@ -21,7 +24,12 @@ class Mesin extends Model
         'status_aktif' => 'boolean',
     ];
 
-    public function laporanHarians()
+    public function workCenter(): BelongsTo
+    {
+        return $this->belongsTo(WorkCenter::class);
+    }
+
+    public function laporanHarians(): HasMany
     {
         return $this->hasMany(LaporanHarian::class);
     }
@@ -30,4 +38,11 @@ class Mesin extends Model
     {
         return $query->where('status_aktif', true);
     }
-}
+
+    public function getEffectiveCtAttribute(): float
+    {
+        return $this->workCenter?->standard_ct_seconds > 0
+            ? $this->workCenter->standard_ct_seconds
+            : $this->ct;
+    }
+};
