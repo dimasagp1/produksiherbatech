@@ -9,6 +9,7 @@ interface WorkCenter {
     standard_ct_seconds: number;
     fit_mp: number;
     shift_hours: number;
+    saturday_shift_hours: number;
     is_active: boolean;
 }
 
@@ -41,13 +42,31 @@ const typeColors: Record<string, string> = {
     filling: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300',
     secondary: 'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300',
 };
+
+const selectedWorkCenter = computed(() => {
+    if (!props.modelValue) return null;
+    return props.workCenters.find(wc => wc.id == props.modelValue) ?? null;
+});
+
+const calculateTarget = computed(() => {
+    const wc = selectedWorkCenter.value;
+    if (!wc || wc.standard_ct_seconds <= 0 || wc.fit_mp <= 0) return 0;
+    const outputPerMinute = 60 / wc.standard_ct_seconds;
+    const minutesPerShift = wc.shift_hours * 60;
+    return Math.round(outputPerMinute * minutesPerShift * wc.fit_mp);
+});
+
+function handleChange(event: Event) {
+    const target = event.target as HTMLSelectElement;
+    emit('update:modelValue', target.value);
+}
 </script>
 
 <template>
     <div>
         <select
             v-model="modelValue"
-            @change="$emit('update:modelValue', $event.target.value)"
+            @change="handleChange"
             :disabled="disabled"
             class="w-full rounded-xl border-slate-300 text-xs text-slate-900 shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
             :class="{ 'opacity-50 cursor-not-allowed': disabled }"
@@ -80,23 +99,24 @@ const typeColors: Record<string, string> = {
                     {{ typeLabels[selectedWorkCenter?.type ?? ''] }}
                 </span>
                 <span class="font-mono text-slate-600 dark:text-slate-300">
-                    CT: {{ selectedWorkCenter?.standard_ct_seconds }}s
+                    CT: {{ selectedWorkCenter?.standard_ct_seconds ?? 0 }}s
                 </span>
                 <span class="font-mono text-slate-600 dark:text-slate-300">
-                    Output/menit: {{ selectedWorkCenter?.standard_ct_seconds > 0 ? (60 / selectedWorkCenter.standard_ct_seconds).toFixed(1) : '-' }}
+                    Output/menit: {{ selectedWorkCenter?.standard_ct_seconds ? (60 / selectedWorkCenter.standard_ct_seconds).toFixed(1) : '-' }}
                 </span>
                 <span class="font-mono text-slate-600 dark:text-slate-300">
-                    Shift: {{ selectedWorkCenter?.shift_hours }} jam
+                    Shift: {{ selectedWorkCenter?.shift_hours ?? 0 }} jam
                 </span>
                 <span class="font-mono text-slate-600 dark:text-slate-300">
-                    MP Standar: {{ selectedWorkCenter?.fit_mp }} orang
+                    MP Standar: {{ selectedWorkCenter?.fit_mp ?? 0 }} orang
                 </span>
                 <span class="font-mono font-bold text-indigo-600 dark:text-indigo-400">
                     Target/Shift: {{ calculateTarget }} pcs
                 </span>
             </div>
         </div>
-    </template>
+    </div>
+</template>
 
 <script setup lang="ts">
 import { computed } from 'vue';

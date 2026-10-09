@@ -11,6 +11,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LaporanHarianController;
 use App\Http\Controllers\LineController;
 use App\Http\Controllers\MesinController;
+use App\Http\Controllers\PPIC\MpsController;
 use App\Http\Controllers\ProdukController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RejectController;
@@ -22,7 +23,6 @@ use App\Http\Controllers\SCM\MaterialScrapController;
 use App\Http\Controllers\SCM\MaterialUsageController;
 use App\Http\Controllers\SCM\OdooMoSyncController;
 use App\Http\Controllers\SCM\StockOpnameController;
-use App\Http\Controllers\SCM\SupplyController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WeeklyPlanController;
 use Illuminate\Support\Facades\Route;
@@ -98,6 +98,32 @@ Route::middleware(['auth', 'role:ppic|superadmin'])->prefix('ppic')->name('ppic.
     // Odoo MO sync (manual button)
     Route::post('/odoo/mo-sync', [OdooMoSyncController::class, 'sync'])->name('odoo.mo-sync');
     Route::get('/odoo/mo-list', [OdooMoSyncController::class, 'moList'])->name('odoo.mo-list');
+});
+
+// PPIC routes - MPS (Master Production Schedule)
+Route::middleware(['auth', 'role:ppic|superadmin|manager'])->prefix('ppic')->name('ppic.')->group(function () {
+    Route::resource('mps', MpsController::class)->only(['index', 'show'])->parameters(['mps' => 'mps']);
+    Route::get('mps/{mps}/grid', [MpsController::class, 'grid'])->name('mps.grid');
+    Route::get('mps/{mps}/export', [MpsController::class, 'export'])->name('mps.export');
+    Route::post('mps/{mps}/close', [MpsController::class, 'close'])->name('mps.close');
+    Route::post('mps/{mps}/resnapshot', [MpsController::class, 'resnapshot'])->name('mps.resnapshot');
+    Route::post('mps/{mps}/approve', [MpsController::class, 'approve'])->name('mps.approve');
+    Route::post('mps/{mps}/activate', [MpsController::class, 'activate'])->name('mps.activate');
+    Route::post('mps/{mps}/generate-weekly', [MpsController::class, 'generateWeeklyPlans'])->name('mps.generate-weekly');
+    Route::post('mps/items/{item}', [MpsController::class, 'updateItem'])->name('mps.item.update');
+
+    // Write operations - only ppic and superadmin
+    Route::middleware(['role:ppic|superadmin'])->group(function () {
+        Route::post('mps', [MpsController::class, 'store'])->name('mps.store');
+        Route::get('mps/create', [MpsController::class, 'create'])->name('mps.create');
+        Route::post('mps/{mps}/approve', [MpsController::class, 'approve'])->name('mps.approve');
+        Route::post('mps/{mps}/activate', [MpsController::class, 'activate'])->name('mps.activate');
+        Route::post('mps/{mps}/generate-weekly', [MpsController::class, 'generateWeeklyPlans'])->name('mps.generate-weekly');
+        Route::post('mps/{mps}/items', [MpsController::class, 'storeItem'])->name('mps.item.store');
+        Route::post('mps/items/{item}', [MpsController::class, 'updateItem'])->name('mps.item.update');
+        Route::delete('mps/{mps}', [MpsController::class, 'destroy'])->name('mps.destroy');
+        Route::put('mps/{mps}', [MpsController::class, 'update'])->name('mps.update');
+    });
 });
 
 // ===== SCM (Phase B + C) =====

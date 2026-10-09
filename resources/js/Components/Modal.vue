@@ -20,22 +20,28 @@ const showSlot = ref(props.show);
 
 watch(
     () => props.show,
-    () => {
-        if (props.show) {
+    (val) => {
+        if (val) {
             document.body.style.overflow = 'hidden';
             showSlot.value = true;
-
             dialog.value?.showModal();
         } else {
             document.body.style.overflow = '';
-
             setTimeout(() => {
                 dialog.value?.close();
                 showSlot.value = false;
             }, 200);
         }
     },
+    { immediate: true },
 );
+onMounted(() => {
+    if (props.show) {
+        document.body.style.overflow = 'hidden';
+        showSlot.value = true;
+        queueMicrotask(() => dialog.value?.showModal());
+    }
+});
 
 const close = () => {
     if (props.closeable) {
@@ -118,7 +124,17 @@ const maxWidthClass = computed(() => {
                     class="mb-6 transform overflow-hidden rounded-lg bg-white shadow-xl transition-all dark:bg-gray-800 sm:mx-auto sm:w-full"
                     :class="maxWidthClass"
                 >
-                    <slot v-if="showSlot" />
+                    <div v-if="showSlot" class="p-6">
+                        <div v-if="$slots.title" class="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                            <slot name="title" />
+                        </div>
+                        <slot name="content">
+                            <slot />
+                        </slot>
+                        <div v-if="$slots.footer" class="mt-6 flex justify-end gap-3">
+                            <slot name="footer" />
+                        </div>
+                    </div>
                 </div>
             </Transition>
         </div>

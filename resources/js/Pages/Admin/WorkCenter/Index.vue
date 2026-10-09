@@ -18,6 +18,7 @@ interface WorkCenter {
     standard_ct_seconds: number;
     fit_mp: number;
     shift_hours: number;
+    saturday_shift_hours: number;
     is_active: boolean;
     notes: string | null;
     mesins_count: number;
@@ -521,4 +522,5 @@ const typeIcon: Record<string, string> = {
                 </DangerButton>
             </template>
         </Modal>
-    </template>
+    </AuthenticatedLayout>
+</template>

@@ -16,6 +16,7 @@ interface WorkCenter {
     standard_ct_seconds: number;
     fit_mp: number;
     shift_hours: number;
+    saturday_shift_hours: number;
     is_active: boolean;
     notes: string | null;
 }

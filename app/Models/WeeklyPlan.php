@@ -14,15 +14,20 @@ class WeeklyPlan extends Model
     use HasFactory, SoftDeletes;
 
     public const MO_STATUS_PENDING = 'pending';
+
     public const MO_STATUS_CONFIRMED = 'confirmed';
+
     public const MO_STATUS_IN_PROGRESS = 'in_progress';
+
     public const MO_STATUS_DONE = 'done';
+
     public const MO_STATUS_CANCELLED = 'cancelled';
 
     protected $fillable = [
         'produk_id',
         'line_id',
         'work_center_id',
+        'mps_plan_id',
         'proses',
         'batch_number',
         'odoo_mo_id',
@@ -34,6 +39,7 @@ class WeeklyPlan extends Model
         'tanggal',
         'status',
         'created_by',
+        'shift',
     ];
 
     protected $casts = [
@@ -131,6 +137,7 @@ class WeeklyPlan extends Model
 
         if (! $this->workCenter) {
             $fallbackMultiplier = $this->multiplier ?: (int) Setting::get('target_output_multiplier', 2000);
+
             return (int) ($this->mp_count ?? $defaultMpCount ?? 0) * $fallbackMultiplier;
         }
 
@@ -175,4 +182,4 @@ class WeeklyPlan extends Model
     {
         return $this->laporanHarians()->exists();
     }
-};
+}

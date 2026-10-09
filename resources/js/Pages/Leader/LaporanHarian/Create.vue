@@ -52,6 +52,11 @@ interface WorkCenter {
     code: string;
     name: string;
     type: 'mixing' | 'filling' | 'secondary';
+    standard_ct_seconds: number;
+    fit_mp: number;
+    shift_hours: number;
+    saturday_shift_hours: number;
+    is_active: boolean;
 }
 
 const props = defineProps<{

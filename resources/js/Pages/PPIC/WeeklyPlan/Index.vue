@@ -19,6 +19,7 @@ interface Produk {
     kode_produk?: string;
     nama_produk: string;
     proses_default?: string;
+    work_center_id?: number | null;
 }
 
 interface Line {
@@ -31,6 +32,7 @@ interface WeeklyPlan {
     id: number;
     produk_id: number;
     line_id?: number | null;
+    work_center_id?: number | null;
     proses: string;
     batch_number: string;
     odoo_mo_id?: number | null;
@@ -43,6 +45,7 @@ interface WeeklyPlan {
     status: string;
     produk?: Produk;
     line?: Line | null;
+    workCenter?: WorkCenter;
     creator?: { id: number; name: string };
 }
 
@@ -64,6 +67,7 @@ interface WorkCenter {
     standard_ct_seconds: number;
     fit_mp: number;
     shift_hours: number;
+    saturday_shift_hours: number;
     is_active: boolean;
 }
 
@@ -501,6 +505,12 @@ const typeColor: Record<string, string> = {
     secondary: 'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800',
 };
 
+const prosesColor: Record<string, string> = {
+    mixing: 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800',
+    filling: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800',
+    secondary: 'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800',
+};
+
 const statusColor: Record<string, string> = {
     draft: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-200 dark:border-amber-700/60',
     aktif: 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300 border border-green-200 dark:border-green-700/60',
@@ -929,11 +939,11 @@ const workCenterTypeLabel: Record<string, string> = {
                                             v-if="plan.workCenter"
                                             :class="[
                                                 'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold',
-                                                typeColor[plan.workCenter.type] ?? 'bg-gray-100 text-gray-800',
+                                                typeColor[plan.workCenter?.type] ?? 'bg-gray-100 text-gray-800',
                                             ]"
                                         >
-                                            <span>{{ workCenterTypeIcon[plan.workCenter.type] }}</span>
-                                            {{ workCenterTypeLabel[plan.workCenter.type] }}
+                                            <span>{{ workCenterTypeIcon[plan.workCenter?.type] }}</span>
+                                            {{ workCenterTypeLabel[plan.workCenter?.type] }}
                                         </span>
                                         <span
                                             v-else
