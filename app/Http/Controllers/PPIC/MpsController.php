@@ -10,6 +10,7 @@ use App\Models\MpsPlan;
 use App\Models\Produk;
 use App\Models\WorkCenter;
 use App\Services\MpsWeeklyPlanGenerator;
+use App\Services\MrpCalculationService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Maatwebsite\Excel\Facades\Excel;
@@ -114,6 +115,8 @@ class MpsController extends Controller
             'workCenters' => $workCenters,
             'daysInMonth' => $daysInMonth,
             'beginningStockOH' => $mps->beginning_stock_oh,
+            'liveStockOH' => $mps->getLiveStockOh(),
+            'isSnapshotStale' => $mps->status === 'draft' ? $mps->isSnapshotStale() : false,
         ]);
     }
 
@@ -193,7 +196,14 @@ class MpsController extends Controller
             return back()->withErrors(['tanggal' => $msg]);
         }
         $item = MpsItem::create(array_merge($validated, ['mps_plan_id' => $mps->id]));
-        $item->recalculateTarget();
+        if (empty($validated['cleaning'])) {
+            $item->recalculateTarget();
+        }
+        if (! empty($validated['cleaning']) && $validated['cleaning']) {
+            MpsItem::where('mps_plan_id', $mps->id)->where('tanggal', $validated['tanggal'])->where('line_id', $validated['line_id'])->where('shift', $validated['shift'] === 'shift1' ? 'shift2' : 'shift1')->where('id', '!=', $item->id)->delete();
+            MpsItem::updateOrCreate(['mps_plan_id' => $mps->id, 'tanggal' => $validated['tanggal'], 'line_id' => $validated['line_id'], 'shift' => $validated['shift'] === 'shift1' ? 'shift2' : 'shift1'], ['work_center_id' => $validated['work_center_id'] ?? null, 'mp_count' => 0, 'target_qty' => 0, 'cleaning' => true, 'adjusted_qty' => null, 'gap_reason' => 'cleaning', 'notes' => 'Auto cleaning full-day']);
+        }
+        app(MrpCalculationService::class)->calculate($mps);
         if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
             return response()->json(['success' => true, 'item' => $item->fresh(['line', 'workCenter'])]);
         }
@@ -278,11 +288,18 @@ class MpsController extends Controller
 
         if (! empty($validated['cleaning']) && $validated['cleaning']) {
             $item->update(['target_qty' => 0, 'mp_count' => 0]);
+            $other = $item->shift === 'shift1' ? 'shift2' : 'shift1';
+            MpsItem::where('mps_plan_id', $item->mps_plan_id)->where('tanggal', $item->tanggal)->where('line_id', $item->line_id)->where('shift', $other)->delete();
+            MpsItem::updateOrCreate(['mps_plan_id' => $item->mps_plan_id, 'tanggal' => $item->tanggal, 'line_id' => $item->line_id, 'shift' => $other], ['work_center_id' => $validated['work_center_id'] ?? $item->work_center_id, 'mp_count' => 0, 'target_qty' => 0, 'cleaning' => true, 'adjusted_qty' => null, 'gap_reason' => 'cleaning', 'notes' => 'Auto cleaning full-day']);
         } elseif (isset($validated['mp_count']) || isset($validated['work_center_id'])) {
-            $item->refresh(); // Refresh to get updated mp_count
+            $item->refresh();
             \Log::info('Recalculating target for item', ['item_id' => $item->id, 'mp_count' => $item->mp_count]);
             $item->recalculateTarget();
             \Log::info('Recalculated target', ['new_target' => $item->target_qty]);
+        }
+        $mrpPlan = $item->plan ?? MpsPlan::find($item->mps_plan_id);
+        if ($mrpPlan) {
+            app(MrpCalculationService::class)->calculate($mrpPlan);
         }
 
         if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
@@ -303,6 +320,18 @@ class MpsController extends Controller
             return back()->withErrors(['error' => 'Hanya plan draft yang bisa di-approve']);
         }
 
+        if ($mps->isSnapshotStale()) {
+            $live = $mps->getLiveStockOh();
+            $snap = (float) $mps->beginning_stock_snapshot;
+
+            return back()->withErrors(['error' => 'Stock OH berubah (snapshot '.number_format($snap, 0, ',', '.').' → live '.number_format($live, 0, ',', '.').'). Silakan Resnapshot sebelum approve.']);
+        }
+
+        $totalQty = (int) $mps->items()->where('cleaning', false)->get()->sum(fn ($i) => $i->adjusted_qty ?? $i->target_qty);
+        if ($totalQty <= 0) {
+            return back()->withErrors(['error' => 'Grid masih kosong (total 0). Isi MPS terlebih dahulu sebelum approve.']);
+        }
+
         $mps->update(['status' => 'approved']);
 
         return redirect()->back()->with('success', 'MPS Plan di-approve. Siap untuk generate Weekly Plans.');
@@ -321,7 +350,7 @@ class MpsController extends Controller
         return redirect()->back()->with('success', 'MPS Plan diaktifkan.');
     }
 
-    public function generateWeeklyPlans(MpsPlan $mps, MpsWeeklyPlanGenerator $generator)
+    public function generateWeeklyPlans(MpsPlan $mps, MpsWeeklyPlanGenerator $generator, MrpCalculationService $mrp)
     {
         $this->checkReadOnly();
 
@@ -330,6 +359,7 @@ class MpsController extends Controller
         }
 
         $result = $generator->generate($mps);
+        $mrp->calculate($mps);
 
         $message = "Weekly Plans generated: {$result['created']} created, {$result['skipped']} skipped";
         if (! empty($result['errors'])) {

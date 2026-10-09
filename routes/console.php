@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('mps:close-expired')->monthlyOn(1, '02:00');
+Schedule::command('mrp:calculate')->dailyAt('03:00');

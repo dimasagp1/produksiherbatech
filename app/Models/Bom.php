@@ -79,24 +79,8 @@ class Bom extends Model
 
         $items = $this->items()->with(['uom', 'materialProduk.uom'])->get();
 
-        // Check sum of raw materials in this BOM (batch size if it's a ruahan/bulk formula)
-        $sumRawWeight = 0;
-        foreach ($items as $it) {
-            $cat = $it->category ?: self::detectCategory($it->material_name, $it->materialProduk?->item_type);
-            if ($cat === 'raw_material' && in_array(strtolower($it->uom?->code ?: $it->uom_name ?: ''), ['g', 'gram', 'gr', 'ml', 'kg', 'l', 'liter'], true)) {
-                $sumRawWeight += (float) $it->quantity;
-            }
-        }
-
         $baseQty = (float) ($this->base_qty ?: 1.0);
-        // If it's a bulk/ruahan formula in g/ml where lines sum to ~1000g/ml, but base_qty is 1 (or 1 batch), and caller asked for specific gram amount (e.g. targetQty = 250)
-        if ($sumRawWeight > 1 && $baseQty == 1 && $targetQty > 1) {
-            $effectiveBaseQty = $sumRawWeight;
-        } else {
-            $effectiveBaseQty = $baseQty;
-        }
-
-        $scaleFactor = $effectiveBaseQty > 0 ? ($targetQty / $effectiveBaseQty) : $targetQty;
+        $scaleFactor = $baseQty > 0 ? ($targetQty / $baseQty) : $targetQty;
 
         $rawMaterials = [];
         $primaryPackaging = [];
@@ -154,18 +138,34 @@ class Bom extends Model
             $tree[] = $node;
         }
 
-        // Aggregate duplicate identical materials
         $aggregate = function (array $list) {
+            $conv = ['g' => 1, 'gram' => 1, 'gr' => 1, 'kg' => 1000, 'kilogram' => 1000, 'ml' => 1, 'l' => 1000, 'liter' => 1000, 'ltr' => 1000];
+            $norm = function ($u) use ($conv) {
+                $k = strtolower(trim((string) $u));
+
+                return $conv[$k] ?? 1;
+            };
+            $baseUom = function ($u) {
+                $k = strtolower(trim((string) $u));
+                if (in_array($k, ['kg', 'kilogram'], true)) {
+                    return 'g';
+                } if (in_array($k, ['l', 'liter', 'ltr'], true)) {
+                    return 'ml';
+                }
+
+                return $u;
+            };
             $grouped = [];
             foreach ($list as $item) {
-                $key = ($item['material_produk_id'] ?? 0).'_'.strtolower(trim($item['material_name'])).'_'.strtolower(trim($item['uom']));
+                $key = ($item['material_produk_id'] ?? 0).'_'.strtolower(trim($item['material_name']));
+                $factor = $norm($item['uom']);
+                $qtyBase = $item['quantity'] * $factor;
+                $perUnitBase = ($item['quantity_per_unit'] ?? 0) * $factor;
                 if (! isset($grouped[$key])) {
-                    $grouped[$key] = $item;
+                    $grouped[$key] = array_merge($item, ['quantity' => $qtyBase, 'quantity_per_unit' => $perUnitBase, 'uom' => $baseUom($item['uom'])]);
                 } else {
-                    $grouped[$key]['quantity'] = round($grouped[$key]['quantity'] + $item['quantity'], 6);
-                    if (isset($item['quantity_per_unit'])) {
-                        $grouped[$key]['quantity_per_unit'] = round($grouped[$key]['quantity_per_unit'] + $item['quantity_per_unit'], 6);
-                    }
+                    $grouped[$key]['quantity'] = round($grouped[$key]['quantity'] + $qtyBase, 6);
+                    $grouped[$key]['quantity_per_unit'] = round($grouped[$key]['quantity_per_unit'] + $perUnitBase, 6);
                 }
             }
 

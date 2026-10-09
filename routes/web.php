@@ -12,6 +12,7 @@ use App\Http\Controllers\LaporanHarianController;
 use App\Http\Controllers\LineController;
 use App\Http\Controllers\MesinController;
 use App\Http\Controllers\PPIC\MpsController;
+use App\Http\Controllers\PPIC\MrpController;
 use App\Http\Controllers\ProdukController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RejectController;
@@ -98,6 +99,14 @@ Route::middleware(['auth', 'role:ppic|superadmin'])->prefix('ppic')->name('ppic.
     // Odoo MO sync (manual button)
     Route::post('/odoo/mo-sync', [OdooMoSyncController::class, 'sync'])->name('odoo.mo-sync');
     Route::get('/odoo/mo-list', [OdooMoSyncController::class, 'moList'])->name('odoo.mo-list');
+});
+
+// PPIC routes - MRP
+Route::middleware(['auth', 'role:ppic|superadmin|manager|warehouse_admin'])->prefix('ppic')->name('ppic.')->group(function () {
+    Route::get('mrp', [MrpController::class, 'index'])->name('mrp.index');
+    Route::get('mrp/{mrp}', [MrpController::class, 'detail'])->name('mrp.detail');
+    Route::post('mrp/recalculate', [MrpController::class, 'recalculate'])->name('mrp.recalculate');
+    Route::get('mrp-export', [MrpController::class, 'export'])->name('mrp.export');
 });
 
 // PPIC routes - MPS (Master Production Schedule)

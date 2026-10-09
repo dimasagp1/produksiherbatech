@@ -28,6 +28,9 @@ class Produk extends Model
         'odoo_synced_at',
         'ct_seconds',
         'work_center_id',
+        'rop',
+        'lead_time_days',
+        'safety_stock_days',
     ];
 
     protected $casts = [
@@ -37,6 +40,9 @@ class Produk extends Model
         'min_stock' => 'float',
         'max_stock' => 'float',
         'ct_seconds' => 'integer',
+        'rop' => 'float',
+        'lead_time_days' => 'integer',
+        'safety_stock_days' => 'integer',
     ];
 
     public function weeklyPlans(): HasMany
@@ -78,4 +84,4 @@ class Produk extends Model
     {
         return $this->ct_seconds ?? $this->workCenter?->standard_ct_seconds ?? 0;
     }
-};
+}

@@ -76,12 +76,30 @@ class MpsPlan extends Model
             return 0;
         }
 
+        return (float) $this->getLiveStockOh();
+    }
+
+    public function getLiveStockOh(): float
+    {
+        if (! $this->produk) {
+            return 0;
+        }
+
         return (float) $this->produk->inventoryStocks()->where('location', 'GUDANG-UTAMA')->sum('quantity');
+    }
+
+    public function isSnapshotStale(float $tolerance = 0.001): bool
+    {
+        if ($this->beginning_stock_snapshot === null) {
+            return false;
+        }
+
+        return abs($this->getLiveStockOh() - (float) $this->beginning_stock_snapshot) > $tolerance;
     }
 
     public function snapshotBeginningStock(): float
     {
-        $val = $this->produk ? (float) $this->produk->inventoryStocks()->where('location', 'GUDANG-UTAMA')->sum('quantity') : 0;
+        $val = $this->getLiveStockOh();
         $this->update(['beginning_stock_snapshot' => $val, 'beginning_stock_date' => now()->toDateString()]);
 
         return $val;

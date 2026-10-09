@@ -78,6 +78,8 @@ const props = defineProps<{
     workCenters: WorkCenter[];
     daysInMonth: number;
     beginningStockOH: number;
+    liveStockOH: number;
+    isSnapshotStale: boolean;
 }>();
 
 const flash = computed(() => (usePage().props as any).flash ?? {});
@@ -204,7 +206,7 @@ function getWcTypeIcon(type: string): string {
                 </div>
                 <div class="flex flex-wrap items-center gap-2.5">
                     <a :href="route('ppic.mps.export', props.plan.id)" class="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">Export Excel (SCD-A)</a>
-                    <SecondaryButton v-if="isDraft" @click="router.post(route('ppic.mps.resnapshot', props.plan.id))">Resnapshot OH</SecondaryButton>
+                    <SecondaryButton v-if="isDraft" :class="props.isSnapshotStale ? 'border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-950/40' : ''" @click="router.post(route('ppic.mps.resnapshot', props.plan.id))">Resnapshot OH<span v-if="props.isSnapshotStale" class="ml-1">⚠️ stale</span></SecondaryButton>
                     <SecondaryButton @click="router.visit(route('ppic.mps.index'))">
                         Kembali ke Daftar
                     </SecondaryButton>
@@ -236,6 +238,10 @@ function getWcTypeIcon(type: string): string {
                 {{ flash.error }}
             </div>
 
+            <div v-if="props.isSnapshotStale && isDraft" class="mb-3 flex items-center justify-between rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                <span>⚠️ Stock OH berubah — snapshot {{ props.plan.beginning_stock_snapshot }} → live {{ props.liveStockOH }}. Resnapshot sebelum approve.</span>
+                <button type="button" class="rounded-lg bg-amber-600 px-3 py-1 text-xs font-bold text-white hover:bg-amber-700" @click="router.post(route('ppic.mps.resnapshot', props.plan.id))">Resnapshot</button>
+            </div>
             <div v-if="gridError" class="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-800 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-200">{{ gridError }}</div>
             <p v-if="!isDraft" class="mb-2 text-xs text-amber-600 dark:text-amber-300">Plan berstatus {{ props.plan.status }} — grid read-only. Ubah ke draft untuk edit.</p>
             <!-- Grid View -->
