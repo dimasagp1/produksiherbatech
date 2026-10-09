@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import InputLabel from '@/Components/InputLabel.vue';
+import Pagination from '@/Components/Pagination.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
-import SecondaryButton from '@/Components/SecondaryButton.vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
@@ -39,12 +39,15 @@ const q = ref('');
 
 watch([mpsFilter, statusFilter], () => apply());
 
-function apply() {
+function apply(page = 1) {
     router.get(route('ppic.mrp.index'), {
+        page: page > 1 ? page : undefined,
         mps_plan_id: mpsFilter.value || undefined,
         status: statusFilter.value,
     }, { preserveScroll: true, preserveState: true });
 }
+
+function goPage(page:number){ apply(page); }
 
 function recalc() {
     router.post(route('ppic.mrp.recalculate'), { mps_plan_id: mpsFilter.value || undefined });
@@ -294,19 +297,14 @@ const total = computed(() => props.summary.critical + props.summary.warning + pr
                         </tbody>
                     </table>
                 </div>
-                <div v-if="props.rows.links || props.rows.total > (props.rows.per_page ?? 50)"
-                    class="border-t border-gray-200 px-4 py-3 dark:border-gray-700">
-                    <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                        <span>Menampilkan {{ filtered.length }} dari {{ props.rows.total }} material</span>
-                        <span v-if="props.rows.current_page && props.rows.last_page" class="flex gap-1">
-                            <button v-if="props.rows.current_page > 1"
-                                @click="router.get(route('ppic.mrp.index'), { page: props.rows.current_page - 1, mps_plan_id: mpsFilter || undefined, status: statusFilter }, { preserveScroll: true })"
-                                class="rounded-md border px-2.5 py-1 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700">Sebelumnya</button>
-                            <button v-if="props.rows.current_page < props.rows.last_page"
-                                @click="router.get(route('ppic.mrp.index'), { page: props.rows.current_page + 1, mps_plan_id: mpsFilter || undefined, status: statusFilter }, { preserveScroll: true })"
-                                class="rounded-md border px-2.5 py-1 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700">Selanjutnya</button>
-                        </span>
-                    </div>
+                <div v-if="(props.rows.total ?? 0) > 0" class="border-t border-gray-200 px-4 py-3 dark:border-gray-700">
+                    <Pagination
+                        :current-page="props.rows.current_page ?? 1"
+                        :last-page="props.rows.last_page ?? 1"
+                        :total="props.rows.total"
+                        :per-page="props.rows.per_page ?? 50"
+                        @page="goPage"
+                    />
                 </div>
             </div>
 
