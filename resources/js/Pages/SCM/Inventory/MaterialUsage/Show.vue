@@ -41,6 +41,9 @@ interface Item {
     quantity_standard: number;
     variance: number;
     ratio_persen?: number | null;
+    odoo_actual_qty?: number | null;
+    odoo_variance_persen?: number | null;
+    local_vs_odoo_variance_persen?: number | null;
     uom_code?: string;
     recipe_breakdown?: RecipeBreakdown | null;
     uom?: { code?: string; name?: string } | null;
@@ -441,11 +444,11 @@ const filteredItems = computed(() => {
                                 <th class="w-10 px-3 py-3 text-center font-bold uppercase tracking-wider text-[11px]">No</th>
                                 <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px]">Kode & Nama Material / Bahan</th>
                                 <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px]">Kategori</th>
-                                <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px] text-right">Standar (Plan)</th>
-                                <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px] text-right">Aktual (Terpakai)</th>
-                                <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px] text-right">Selisih</th>
+                                <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px] text-right">Standar</th>
+                                <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px] text-right">Aktual</th>
+                                <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px] text-right">Odoo Actual</th>
                                 <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px] text-right">Deviasi %</th>
-                                <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px] text-center">Status Efisiensi</th>
+                                <th class="px-4 py-3 font-bold uppercase tracking-wider text-[11px] text-center">Status</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100 dark:divide-slate-700/60">
@@ -497,20 +500,15 @@ const filteredItems = computed(() => {
                                         {{ it.quantity_standard.toLocaleString('id-ID') }} <span class="text-[10px] text-slate-400">{{ getItemUom(it) }}</span>
                                     </td>
                                     <td class="px-4 py-3.5 text-right font-mono font-bold text-slate-900 dark:text-slate-100">
-                                        {{ it.quantity_used.toLocaleString('id-ID') }} <span class="text-[10px] text-slate-400">{{ getItemUom(it) }}</span>
+                                        <div>{{ it.quantity_used.toLocaleString('id-ID') }} <span class="text-[10px] text-slate-400">{{ getItemUom(it) }}</span></div>
+                                        <div v-if="it.odoo_actual_qty != null" class="text-[10px] font-normal" :class="Number(it.local_vs_odoo_variance_persen ?? 0) > 0 ? 'text-rose-500' : 'text-emerald-600'">{{ it.local_vs_odoo_variance_persen != null ? `${Number(it.local_vs_odoo_variance_persen) > 0 ? '+' : ''}${it.local_vs_odoo_variance_persen}% vs Odoo` : '' }}</div>
                                     </td>
-                                    <td
-                                        class="px-4 py-3.5 text-right font-mono font-semibold"
-                                        :class="it.variance > 0 ? 'text-rose-600 dark:text-rose-400' : (it.variance < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-600')"
-                                    >
-                                        {{ it.variance > 0 ? '+' : '' }}{{ it.variance.toLocaleString('id-ID') }}
+                                    <td class="px-4 py-3.5 text-right font-mono">
+                                        <div v-if="it.odoo_actual_qty != null" :class="it.odoo_variance_persen != null && Number(it.odoo_variance_persen) > 0 ? 'text-rose-600' : 'text-emerald-600'">{{ Number(it.odoo_actual_qty).toLocaleString('id-ID') }} <span class="text-[10px] text-slate-400">{{ getItemUom(it) }}</span></div>
+                                        <div v-else class="text-slate-400">-</div>
+                                        <div v-if="it.odoo_variance_persen != null" class="text-[10px]" :class="Number(it.odoo_variance_persen) > 0 ? 'text-rose-500' : 'text-emerald-600'">{{ Number(it.odoo_variance_persen) > 0 ? '+' : '' }}{{ it.odoo_variance_persen }}% vs std</div>
                                     </td>
-                                    <td
-                                        class="px-4 py-3.5 text-right font-bold"
-                                        :class="it.ratio_persen !== null && it.ratio_persen !== undefined && it.ratio_persen > summary.ratio_target ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'"
-                                    >
-                                        {{ it.ratio_persen !== null && it.ratio_persen !== undefined ? `${(it.ratio_persen ?? 0) > 0 ? '+' : ''}${it.ratio_persen}%` : '-' }}
-                                    </td>
+                                    <td class="px-4 py-3.5 text-right font-bold" :class="it.ratio_persen != null && Number(it.ratio_persen) > summary.ratio_target ? 'text-rose-600' : 'text-emerald-600'">{{ it.ratio_persen != null ? `${Number(it.ratio_persen ?? 0) > 0 ? '+' : ''}${it.ratio_persen}%` : '-' }}</td>
                                     <td class="px-4 py-3.5 text-center">
                                         <span
                                             class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold"

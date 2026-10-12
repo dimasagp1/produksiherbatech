@@ -10,3 +10,4 @@ Artisan::command('inspire', function () {
 
 Schedule::command('mps:close-expired')->monthlyOn(1, '02:00');
 Schedule::command('mrp:calculate')->dailyAt('03:00');
+Schedule::command('material-usage:sync-ratio --days=7')->dailyAt('03:30');

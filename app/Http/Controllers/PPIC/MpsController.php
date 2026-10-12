@@ -130,7 +130,7 @@ class MpsController extends Controller
             ->orderBy('shift')
             ->get()
             ->groupBy(function ($item) {
-                return $item->tanggal->format('Y-m-d');
+                return is_string($item->tanggal) ? substr($item->tanggal, 0, 10) : $item->tanggal->format('Y-m-d');
             });
 
         $lines = Line::aktif()->with('defaultWorkCenter')->get();

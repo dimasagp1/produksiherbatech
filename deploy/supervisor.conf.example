@@ -1,0 +1,18 @@
+[program:herbatech-queue]
+process_name=%(program_name)s_%(process_num)02d
+command=php /var/www/herbatech/artisan queue:work --queue=odoo_sync,mrp,reports --sleep=3 --tries=3 --max-time=3600
+autostart=true
+autorestart=true
+user=www-data
+numprocs=2
+redirect_stderr=true
+stdout_logfile=/var/www/herbatech/storage/logs/queue.log
+stopwaitsecs=3600
+
+[program:herbatech-schedule]
+command=php /var/www/herbatech/artisan schedule:work
+autostart=true
+autorestart=true
+user=www-data
+redirect_stderr=true
+stdout_logfile=/var/www/herbatech/storage/logs/schedule.log

@@ -583,8 +583,6 @@ class LaporanHarianController extends Controller
             'line_id' => 'nullable|exists:lines,id',
             'target_mp' => 'nullable|numeric|min:0',
             'total_mp' => 'nullable|integer|min:1',
-            'quality_input_persen' => 'nullable|numeric|min:0|max:100',
-            'quality_method' => 'nullable|in:auto,manual',
         ]);
 
         $mesinId = $validated['mesin_id'] ?? $laporanHarian->mesin_id;
@@ -616,9 +614,6 @@ class LaporanHarianController extends Controller
         $targetTotal = $targetMp * $totalMp;
         $produktivitas = $targetTotal > 0 ? min(999.99, ($outputFisik / $targetTotal) * 100) : 0;
 
-        $qualityInput = $validated['quality_input_persen'] ?? null;
-        $qualityMethod = $validated['quality_method'] ?? 'auto';
-
         $laporanHarian->update([
             'mesin_id' => $mesinId,
             'ct' => $mesin->effective_ct,
@@ -630,13 +625,13 @@ class LaporanHarianController extends Controller
             'waktu_bersih_menit' => $waktuBersih,
             'target_teoritis' => $waktuBersih * $mesin->effective_ct,
             'yield_persen' => $quality,
+            'quality_input_persen' => null,
+            'quality_method' => 'auto',
             'availability_persen' => $availability,
             'performance_persen' => $performance,
             'oee_persen' => $oee,
             'produktivitas_persen' => $produktivitas,
             'status' => 'submitted',
-            'quality_input_persen' => $qualityInput,
-            'quality_method' => $qualityMethod,
         ]);
 
         return redirect()->route('leader.laporan-harian.show', $laporanHarian->id)
@@ -671,4 +666,4 @@ class LaporanHarianController extends Controller
 
         return (int) $parts[0] * 60 + (int) $parts[1];
     }
-};
+}

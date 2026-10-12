@@ -37,18 +37,18 @@ class DashboardController extends Controller
             ->where('status', 'aktif')
             ->first();
 
+        $postSyncFilter = function ($q) use ($viewMode, $selectedDate) {
+            if ($viewMode === 'post_sync') {
+                $q->whereNotNull('odoo_synced_at')->whereDate('odoo_synced_at', $selectedDate);
+            }
+        };
+
         // Base query for laporans
         $baseQuery = LaporanHarian::with(['produk', 'line', 'user', 'mesin', 'workCenter'])
             ->withSum('rejectDetails as total_reject', 'jumlah')
-            ->where('tanggal', $selectedDate);
-
-        // For post_sync view, filter by odoo_synced_at date
-        if ($viewMode === 'post_sync') {
-            $baseQuery->whereNotNull('odoo_synced_at')
-                ->whereDate('odoo_synced_at', $selectedDate);
-        }
-
-        $baseQuery->when($shiftValid, fn ($q) => $q->where('shift', $selectedShift))
+            ->where('tanggal', $selectedDate)
+            ->tap($postSyncFilter)
+            ->when($shiftValid, fn ($q) => $q->where('shift', $selectedShift))
             ->when($workCenterId, fn ($q, $wc) => $q->where('work_center_id', $wc))
             ->when($user->hasAnyRole(['leader', 'operator']), function ($query) use ($user) {
                 return $query->where('user_id', $user->id);
@@ -78,6 +78,7 @@ class DashboardController extends Controller
         // Downtime pareto
         $todayLaporansWithDowntime = LaporanHarian::with(['downtimeDetails.alasanDowntime'])
             ->where('tanggal', $selectedDate)
+            ->tap($postSyncFilter)
             ->when($shiftValid, fn ($q) => $q->where('shift', $selectedShift))
             ->when($workCenterId, fn ($q, $wc) => $q->where('work_center_id', $wc))
             ->when($user->hasRole('leader'), fn ($q) => $q->where('user_id', $user->id))
@@ -276,4 +277,4 @@ class DashboardController extends Controller
             ] : null,
         ]);
     }
-};
+}

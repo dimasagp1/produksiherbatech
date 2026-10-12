@@ -140,6 +140,7 @@ const fProduk = ref('');
 const fJenis = ref('');
 const dateInput = ref(props.selectedDate);
 const shiftInput = ref(props.selectedShift ?? '');
+const viewModeInput = ref((props as any).viewMode ?? 'live');
 
 watch(
     () => props.selectedDate,
@@ -197,7 +198,7 @@ function heatColor(v: number) {
 function goLive() {
     router.get(
         route('dashboard'),
-        { shift: shiftInput.value || undefined },
+        { view_mode: viewModeInput.value !== 'live' ? viewModeInput.value : undefined, shift: shiftInput.value || undefined },
         { preserveState: false },
     );
 }
@@ -205,9 +206,12 @@ function goHistory() {
     if (!dateInput.value) return;
     router.get(
         route('dashboard'),
-        { tanggal: dateInput.value, shift: shiftInput.value || undefined },
+        { tanggal: dateInput.value, shift: shiftInput.value || undefined, view_mode: viewModeInput.value !== 'live' ? viewModeInput.value : undefined },
         { preserveState: false },
     );
+}
+function goViewMode() {
+    goHistory();
 }
 
 declare const Chart: any;
@@ -550,12 +554,11 @@ onMounted(() => {
                     <span style="color: var(--text-muted); font-size: 12px"
                         >{{ todayLaporans.length }} laporan
                         {{
-                            isLive
-                                ? 'hari ini'
-                                : 'pada ' +
-                                  new Date(selectedDate).toLocaleDateString(
-                                      'id-ID',
-                                  )
+                            (viewModeInput as any) === 'post_sync'
+                                ? 'post-sync pada ' + new Date(selectedDate).toLocaleDateString('id-ID')
+                                : isLive
+                                  ? 'hari ini'
+                                  : 'pada ' + new Date(selectedDate).toLocaleDateString('id-ID')
                         }}</span
                     >
                 </div>
@@ -609,12 +612,25 @@ onMounted(() => {
                     <option value="shift1">Shift 1</option>
                     <option value="shift2">Shift 2</option>
                 </select>
+                <select
+                    v-model="viewModeInput"
+                    class="rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                    @change="goViewMode"
+                >
+                    <option value="live">Live (tanggal laporan)</option>
+                    <option value="post_sync">Post-Sync (odoo_synced_at)</option>
+                </select>
                 <button
                     @click="goHistory"
                     class="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 dark:bg-indigo-500"
                 >
                     Tampilkan
                 </button>
+                <span
+                    v-if="viewModeInput === 'post_sync'"
+                    class="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
+                    >Post-Sync OEE</span
+                >
                 <span
                     v-if="!isLive"
                     style="font-size: 11px; color: var(--text-muted)"
