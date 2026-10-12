@@ -24,6 +24,7 @@ use App\Http\Controllers\SCM\MaterialScrapController;
 use App\Http\Controllers\SCM\MaterialUsageController;
 use App\Http\Controllers\SCM\OdooMoSyncController;
 use App\Http\Controllers\SCM\StockOpnameController;
+use App\Http\Controllers\SCM\SupplyController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WeeklyPlanController;
 use Illuminate\Support\Facades\Route;
@@ -133,6 +134,16 @@ Route::middleware(['auth', 'role:ppic|superadmin|manager'])->prefix('ppic')->nam
         Route::delete('mps/{mps}', [MpsController::class, 'destroy'])->name('mps.destroy');
         Route::put('mps/{mps}', [MpsController::class, 'update'])->name('mps.update');
     });
+});
+
+// Supply H-1 — warehouse_admin primary, ppic/manager/spv/admin view
+Route::middleware(['auth', 'role:warehouse_admin|manager|superadmin|admin|ppic|spv'])->prefix('scm')->name('scm.')->group(function () {
+    Route::get('/supply', [SupplyController::class, 'index'])->name('supply.index');
+    Route::get('/supply/create', [SupplyController::class, 'create'])->name('supply.create');
+    Route::post('/supply', [SupplyController::class, 'store'])->name('supply.store');
+    Route::get('/supply/kpi', [SupplyController::class, 'kpi'])->name('supply.kpi');
+    Route::get('/supply/{supply}', [SupplyController::class, 'show'])->name('supply.show');
+    Route::post('/supply/{supply}/deliver', [SupplyController::class, 'markDelivered'])->name('supply.deliver');
 });
 
 // ===== SCM (Phase B + C) =====

@@ -542,6 +542,29 @@ function closeMobileNav() {
                     </svg>
                     Delivery Schedule
                 </Link>
+                <Link
+                    v-if="
+                        hasRole([
+                            'warehouse_admin',
+                            'manager',
+                            'superadmin',
+                            'admin',
+                            'ppic',
+                            'spv',
+                        ])
+                    "
+                    :href="route('scm.supply.index')"
+                    class="nav-item"
+                    :class="{ active: isActive('scm.supply.*') }"
+                >
+                    <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
+                        <path d="M12 11a4 4 0 100-8 4 4 0 000 8z" />
+                        <path d="M16 8l-2 2 2 2" />
+                        <path d="M21 11v-2a2 2 0 00-2-2h-2" />
+                    </svg>
+                    Supply H-1
+                </Link>
 
                 <!-- Master Data & Settings Section -->
                 <div
