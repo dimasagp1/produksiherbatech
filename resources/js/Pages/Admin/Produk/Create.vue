@@ -16,7 +16,7 @@ const form = useForm({
 const prosesOptions = [
     { value: 'mixing', label: 'Mixing' },
     { value: 'filling', label: 'Filling' },
-    { value: 'packing', label: 'Packing' },
+    { value: 'secondary', label: 'Secondary (Packing)' },
 ];
 
 function submit() {

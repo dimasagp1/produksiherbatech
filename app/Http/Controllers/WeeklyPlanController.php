@@ -224,8 +224,8 @@ class WeeklyPlanController extends Controller
             'target_output' => 'sometimes|nullable|integer|min:0',
         ];
 
-        // Packing hold: plan packing boleh digeser tanggal
-        if ($weeklyPlan->proses === 'secondary') {
+        // Secondary/Packing hold: plan secondary boleh digeser tanggal
+        if (in_array($weeklyPlan->proses, ['secondary', 'packing'], true)) {
             $rules['tanggal'] = 'sometimes|date';
         }
 

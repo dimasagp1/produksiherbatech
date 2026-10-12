@@ -1543,7 +1543,7 @@ const workCenterTypeLabel: Record<string, string> = {
                     class="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
                 >
                     Plan aktif: edit terbatas ke MP, Line, Packing Hold{{
-                        editItem.proses === 'packing'
+                        editItem.proses === 'packing' || editItem.proses === 'secondary'
                             ? ', dan tanggal (jika hold)'
                             : ''
                     }}. Produk/proses/batch dikunci.
@@ -1578,11 +1578,11 @@ const workCenterTypeLabel: Record<string, string> = {
                         :required="
                             editItem.status === 'draft' ||
                             (editItem.status === 'aktif' &&
-                                editItem.proses === 'packing')
+                                (editItem.proses === 'packing' || editItem.proses === 'secondary'))
                         "
                         :disabled="
                             editItem.status === 'aktif' &&
-                            editItem.proses !== 'packing'
+                            editItem.proses !== 'packing' && editItem.proses !== 'secondary'
                         "
                     />
                     <InputError

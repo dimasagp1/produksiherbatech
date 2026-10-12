@@ -702,8 +702,8 @@ class OdooService
     public function parseMoProcess(array $item, ?Produk $produk = null): string
     {
         $searchStr = strtolower(($item['origin'] ?? '').' '.($item['name'] ?? ''));
-        if (str_contains($searchStr, 'packing') || str_contains($searchStr, 'kemas') || str_contains($searchStr, 'pack') || str_contains($searchStr, 'pck')) {
-            return 'packing';
+        if (str_contains($searchStr, 'packing') || str_contains($searchStr, 'kemas') || str_contains($searchStr, 'pack') || str_contains($searchStr, 'pck') || str_contains($searchStr, 'secondary') || str_contains($searchStr, 'kemas sekunder') || str_contains($searchStr, 'packing')) {
+            return 'secondary';
         }
         if (str_contains($searchStr, 'filling') || str_contains($searchStr, 'isi') || str_contains($searchStr, 'fill') || str_contains($searchStr, 'fil')) {
             return 'filling';
@@ -712,7 +712,8 @@ class OdooService
             return 'mixing';
         }
 
-        return $produk?->proses_default ?: 'mixing';
+        $fallback = $produk?->proses_default ?: 'mixing';
+        return $fallback === 'packing' ? 'secondary' : $fallback;
     }
 
     /**
@@ -1534,9 +1535,11 @@ class OdooService
 
                     $weeklyPlan = WeeklyPlan::withTrashed()->where('odoo_mo_id', $moId)->first();
                     if (! $weeklyPlan && $localProduk) {
+                        $fallbackProses = $localProduk->proses_default ?: 'secondary';
+                        if ($fallbackProses === 'packing') $fallbackProses = 'secondary';
                         $weeklyPlan = WeeklyPlan::create([
                             'produk_id' => $localProduk->id,
-                            'proses' => $localProduk->proses_default ?: 'packing',
+                            'proses' => $fallbackProses,
                             'batch_number' => $batchNumber,
                             'odoo_mo_id' => $moId,
                             'mo_status' => 'done',
@@ -1551,9 +1554,9 @@ class OdooService
                     if (! $laporan && $weeklyPlan) {
                         $defaultMesinId = Mesin::orderBy('id')->value('id') ?? 1;
                         $defaultLineId = Line::orderBy('id')->value('id') ?? 1;
-                        $prosesVal = in_array(strtolower($weeklyPlan->proses), ['mixing', 'filling', 'packing'], true)
-                            ? strtolower($weeklyPlan->proses)
-                            : 'packing';
+                        $prosesVal = in_array(strtolower($weeklyPlan->proses), ['mixing', 'filling', 'secondary', 'packing'], true)
+                            ? (strtolower($weeklyPlan->proses) === 'packing' ? 'secondary' : strtolower($weeklyPlan->proses))
+                            : 'secondary';
 
                         $laporan = LaporanHarian::create([
                             'user_id' => $creatorId,
@@ -2168,7 +2171,7 @@ class OdooService
                         'kode_produk' => $code,
                         'nama_produk' => $pName,
                         'item_type' => $itemType,
-                        'proses_default' => stripos($pName, 'ruahan') !== false ? 'mixing' : (stripos($pName, 'primer') !== false ? 'filling' : 'packing'),
+                        'proses_default' => stripos($pName, 'ruahan') !== false ? 'mixing' : (stripos($pName, 'primer') !== false ? 'filling' : 'secondary'),
                         'odoo_uom' => $uomName,
                         'status_aktif' => true,
                     ]);

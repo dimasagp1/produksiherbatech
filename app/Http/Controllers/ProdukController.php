@@ -40,8 +40,11 @@ class ProdukController extends Controller
         $validated = $request->validate([
             'kode_produk' => 'required|string|max:255|unique:produks,kode_produk',
             'nama_produk' => 'required|string|max:255',
-            'proses_default' => 'required|in:mixing,filling,packing',
+            'proses_default' => 'required|in:mixing,filling,secondary,packing',
         ]);
+        if (($validated['proses_default'] ?? '') === 'packing') {
+            $validated['proses_default'] = 'secondary';
+        }
 
         Produk::create($validated);
 
@@ -68,9 +71,12 @@ class ProdukController extends Controller
         $validated = $request->validate([
             'kode_produk' => 'required|string|max:255|unique:produks,kode_produk,'.$produk->id,
             'nama_produk' => 'required|string|max:255',
-            'proses_default' => 'required|in:mixing,filling,packing',
+            'proses_default' => 'required|in:mixing,filling,secondary,packing',
             'status_aktif' => 'boolean',
         ]);
+        if (($validated['proses_default'] ?? '') === 'packing') {
+            $validated['proses_default'] = 'secondary';
+        }
 
         $produk->update($validated);
 

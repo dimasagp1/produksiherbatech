@@ -20,14 +20,14 @@ const props = defineProps<{
 const form = useForm({
     kode_produk: props.produk.kode_produk,
     nama_produk: props.produk.nama_produk,
-    proses_default: props.produk.proses_default,
+    proses_default: props.produk.proses_default === 'packing' ? 'secondary' : props.produk.proses_default,
     status_aktif: props.produk.status_aktif,
 });
 
 const prosesOptions = [
     { value: 'mixing', label: 'Mixing' },
     { value: 'filling', label: 'Filling' },
-    { value: 'packing', label: 'Packing' },
+    { value: 'secondary', label: 'Secondary (Packing)' },
 ];
 
 function submit() {
