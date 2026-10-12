@@ -178,9 +178,9 @@ class LaporanHarian extends Model
     public function getEffectiveQualityAttribute(): float
     {
         if ($this->quality_method === 'manual' && $this->quality_input_persen !== null) {
-            return $this->quality_input_persen;
+            return (float) $this->quality_input_persen;
         }
 
-        return $this->yield_persen;
+        return (float) ($this->yield_persen ?? 0);
     }
 }
