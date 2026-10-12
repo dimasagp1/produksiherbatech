@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -10,7 +11,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class LaporanHarian extends Model
 {
-    use HasFactory, SoftDeletes;
+    use Auditable, HasFactory, SoftDeletes;
 
     protected $fillable = [
         'user_id',
@@ -179,6 +180,7 @@ class LaporanHarian extends Model
         if ($this->quality_method === 'manual' && $this->quality_input_persen !== null) {
             return $this->quality_input_persen;
         }
+
         return $this->yield_persen;
     }
-};
+}

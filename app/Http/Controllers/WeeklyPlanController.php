@@ -37,7 +37,7 @@ class WeeklyPlanController extends Controller
         $validated = $request->validate([
             'produk_id' => 'required|exists:produks,id',
             'line_id' => 'nullable|exists:lines,id',
-            'work_center_id' => 'required|exists:work_centers,id',
+            'work_center_id' => 'nullable|exists:work_centers,id',
             'proses' => 'required|in:mixing,filling,secondary',
             'batch_number' => 'required|string|max:255',
             'tanggal' => 'required|date',
@@ -70,11 +70,11 @@ class WeeklyPlanController extends Controller
             ->where('status', 'draft')
             ->first();
 
-        $workCenter = WorkCenter::findOrFail($validated['work_center_id']);
+        $workCenter = ! empty($validated['work_center_id'] ?? null) ? WorkCenter::find($validated['work_center_id']) : null;
         $mpCount = (int) ($validated['mp_count'] ?? 0);
         $targetOutput = ! empty($validated['target_output'])
             ? (int) $validated['target_output']
-            : ($existingDraft?->target_output ?: TargetCalculationService::calculateTarget($workCenter, $mpCount));
+            : ($existingDraft?->target_output ?: ($workCenter ? TargetCalculationService::calculateTarget($workCenter, $mpCount) : $mpCount * (int) Setting::get('target_output_multiplier', 2000)));
 
         if ($existingDraft && $existingDraft->tanggal !== $validated['tanggal']) {
             $existingDraft->update([
@@ -120,7 +120,7 @@ class WeeklyPlanController extends Controller
 
         $validated['created_by'] = auth()->id();
         $validated['mp_count'] = $mpCount;
-        $validated['multiplier'] = $workCenter->fit_mp ?: 1;
+        $validated['multiplier'] = $workCenter?->fit_mp ?: 1;
         $validated['line_id'] = $validated['line_id'] ?? null;
         $validated['mo_status'] = $validated['mo_status'] ?? WeeklyPlan::MO_STATUS_PENDING;
         $validated['target_output'] = $targetOutput;
@@ -231,7 +231,6 @@ class WeeklyPlanController extends Controller
 
         $validated = $request->validate($rules);
 
-        // Auto-calculate target_output using Work Center CT if mp_count changed
         if (array_key_exists('mp_count', $validated)
             && $validated['mp_count'] !== null
             && ! array_key_exists('target_output', $validated)
@@ -239,6 +238,8 @@ class WeeklyPlanController extends Controller
             $wc = $weeklyPlan->workCenter;
             if ($wc) {
                 $validated['target_output'] = TargetCalculationService::calculateTarget($wc, (int) $validated['mp_count']);
+            } else {
+                $validated['target_output'] = (int) $validated['mp_count'] * (int) Setting::get('target_output_multiplier', 2000);
             }
         }
 
@@ -338,4 +339,4 @@ class WeeklyPlanController extends Controller
             'capacity_info' => $capacityInfo,
         ]);
     }
-};
+}

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Exceptions\OdooConnectionException;
+use App\Exceptions\OdooValidationException;
 use App\Models\Bom;
 use App\Models\InventoryStock;
 use App\Models\LaporanHarian;
@@ -16,6 +18,7 @@ use App\Models\Setting;
 use App\Models\User;
 use App\Models\WeeklyPlan;
 use Exception;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -34,6 +37,10 @@ class OdooService
 
     protected int $timeout;
 
+    protected int $timeoutConnect;
+
+    protected int $timeoutResponse;
+
     protected ?int $uid = null;
 
     public function __construct()
@@ -41,9 +48,6 @@ class OdooService
         $this->reloadConfig();
     }
 
-    /**
-     * Reload settings from Database or fallback to config
-     */
     public function reloadConfig(): void
     {
         $this->host = rtrim(Setting::get('odoo_host', config('odoo.host', 'http://localhost:8069')), '/');
@@ -51,6 +55,8 @@ class OdooService
         $this->username = Setting::get('odoo_username', config('odoo.username', ''));
         $this->apiKey = Setting::get('odoo_api_key', config('odoo.api_key', ''));
         $this->timeout = (int) Setting::get('odoo_timeout', config('odoo.timeout', 15));
+        $this->timeoutConnect = (int) config('odoo.timeout_connect', 5);
+        $this->timeoutResponse = (int) config('odoo.timeout_response', $this->timeout);
         $this->uid = null;
     }
 
@@ -67,13 +73,12 @@ class OdooService
      */
     protected function client(): PendingRequest
     {
-        $client = Http::timeout($this->timeout);
+        $client = Http::connectTimeout($this->timeoutConnect)->timeout($this->timeoutResponse);
 
         if (config('odoo.verify_ssl', env('ODOO_VERIFY_SSL', true)) === false) {
             return $client->withoutVerifying();
         }
 
-        // Search for valid local CA bundle paths to fix broken php.ini curl.cainfo in environments like Laragon
         $caPaths = [
             'C:\\laragon\\etc\\ssl\\cacert.pem',
             'C:/laragon/etc/ssl/cacert.pem',
@@ -87,6 +92,36 @@ class OdooService
         }
 
         return $client;
+    }
+
+    public function ping(): array
+    {
+        try {
+            $payload = [
+                'jsonrpc' => '2.0',
+                'method' => 'call',
+                'params' => ['service' => 'common', 'method' => 'version', 'args' => []],
+                'id' => rand(1000, 9999),
+            ];
+            $res = $this->client()->withHeaders(['Content-Type' => 'application/json'])->post($this->host.'/jsonrpc', $payload);
+            if (! $res->successful()) {
+                throw new OdooConnectionException('HTTP '.$res->status());
+            }
+            $body = $res->json();
+            if (isset($body['error'])) {
+                throw new OdooValidationException($body['error']['data']['message'] ?? $body['error']['message'] ?? 'RPC Error');
+            }
+            $ver = $body['result']['server_version'] ?? 'unknown';
+            Log::info('Odoo version', ['version' => $ver]);
+
+            return ['success' => true, 'version' => $ver, 'result' => $body['result'] ?? []];
+        } catch (OdooConnectionException|OdooValidationException $e) {
+            throw $e;
+        } catch (ConnectionException $e) {
+            throw new OdooConnectionException($e->getMessage(), 0, $e);
+        } catch (Exception $e) {
+            throw new OdooConnectionException($e->getMessage(), 0, $e);
+        }
     }
 
     /**
@@ -124,26 +159,32 @@ class OdooService
                 ->post($this->host.'/jsonrpc', $payload);
 
             if (! $response->successful()) {
-                throw new Exception('Gagal menghubungi server Odoo: HTTP '.$response->status());
+                throw new OdooConnectionException('Gagal menghubungi server Odoo: HTTP '.$response->status());
             }
 
             $body = $response->json();
             if (isset($body['error'])) {
                 $errMsg = $body['error']['data']['message'] ?? $body['error']['message'] ?? 'Odoo RPC Error';
-                throw new Exception('Odoo Auth Error: '.$errMsg);
+                throw new OdooValidationException('Odoo Auth Error: '.$errMsg);
             }
 
             $uid = $body['result'] ?? false;
             if (! $uid || ! is_numeric($uid)) {
-                throw new Exception('Autentikasi Odoo gagal. Periksa Username, Database, dan API Key / Password Anda.');
+                throw new OdooValidationException('Autentikasi Odoo gagal. Periksa Username, Database, dan API Key / Password Anda.');
             }
 
             $this->uid = (int) $uid;
 
             return $this->uid;
-        } catch (Exception $e) {
+        } catch (OdooConnectionException|OdooValidationException $e) {
             Log::error('Odoo Authentication Failed', ['error' => $e->getMessage()]);
             throw $e;
+        } catch (ConnectionException $e) {
+            Log::error('Odoo Authentication Failed', ['error' => $e->getMessage()]);
+            throw new OdooConnectionException($e->getMessage(), 0, $e);
+        } catch (Exception $e) {
+            Log::error('Odoo Authentication Failed', ['error' => $e->getMessage()]);
+            throw new OdooConnectionException($e->getMessage(), 0, $e);
         }
     }
 
@@ -247,18 +288,22 @@ class OdooService
             'id' => rand(1000, 9999),
         ];
 
-        $response = $this->client()
-            ->withHeaders(['Content-Type' => 'application/json'])
-            ->post($this->host.'/jsonrpc', $payload);
+        try {
+            $response = $this->client()
+                ->withHeaders(['Content-Type' => 'application/json'])
+                ->post($this->host.'/jsonrpc', $payload);
+        } catch (ConnectionException $e) {
+            throw new OdooConnectionException($e->getMessage(), 0, $e);
+        }
 
         if (! $response->successful()) {
-            throw new Exception("HTTP error saat memanggil model {$model}: ".$response->status());
+            throw new OdooConnectionException("HTTP error saat memanggil model {$model}: ".$response->status());
         }
 
         $body = $response->json();
         if (isset($body['error'])) {
             $msg = $body['error']['data']['message'] ?? $body['error']['message'] ?? 'RPC Error';
-            throw new Exception("Odoo Model Error ({$model}::{$method}): ".$msg);
+            throw new OdooValidationException("Odoo Model Error ({$model}::{$method}): ".$msg);
         }
 
         return $body['result'] ?? null;
@@ -2246,8 +2291,9 @@ class OdooService
                     'calendar_id' => is_array($c['resource_calendar_id'] ?? null) ? ($c['resource_calendar_id'][0] ?? null) : ($c['resource_calendar_id'] ?? null),
                 ];
             }, $centers);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             \Log::warning('Failed to fetch Work Centers from Odoo', ['error' => $e->getMessage()]);
+
             return [];
         }
     }
@@ -2292,11 +2338,11 @@ class OdooService
                     } else {
                         $summary['updated']++;
                     }
-                } catch (\Exception $e) {
+                } catch (Exception $e) {
                     $summary['errors'][] = "Produk Odoo ID {$odooId}: {$e->getMessage()}";
                 }
             }
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             $summary['errors'][] = 'Beginning Stock Sync: '.$e->getMessage();
         }
 

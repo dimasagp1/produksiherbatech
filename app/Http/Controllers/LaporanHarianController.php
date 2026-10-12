@@ -102,7 +102,7 @@ class LaporanHarianController extends Controller
             'weekly_plan_id' => 'required|exists:weekly_plans,id',
             'mesin_id' => 'required|exists:mesins,id',
             'line_id' => 'required|exists:lines,id',
-            'work_center_id' => 'required|exists:work_centers,id',
+            'work_center_id' => 'nullable|exists:work_centers,id',
             'tanggal' => 'required|date',
             'shift' => 'nullable|in:shift1,shift2',
             'target_mp' => 'required|numeric|min:0',
@@ -116,7 +116,6 @@ class LaporanHarianController extends Controller
             $weeklyPlan->update(['status' => 'aktif']);
         }
 
-        // Cegah duplikasi: 1 weekly plan (produk+proses+batch+tanggal) hanya boleh 1 laporan
         $existingLaporan = LaporanHarian::where('weekly_plan_id', $weeklyPlan->id)->exists();
         if ($existingLaporan) {
             return back()->withErrors([
@@ -126,9 +125,8 @@ class LaporanHarianController extends Controller
         }
 
         $mesin = Mesin::findOrFail($validated['mesin_id']);
-        $workCenter = WorkCenter::findOrFail($validated['work_center_id']);
+        $workCenter = ! empty($validated['work_center_id'] ?? null) ? WorkCenter::find($validated['work_center_id']) : null;
 
-        // Create laporan with timer_status='start', calculations happen on endTimer
         $laporan = LaporanHarian::create([
             'user_id' => auth()->id(),
             'weekly_plan_id' => $weeklyPlan->id,
@@ -138,7 +136,7 @@ class LaporanHarianController extends Controller
             'mesin_id' => $validated['mesin_id'],
             'ct' => $mesin->effective_ct,
             'line_id' => $validated['line_id'],
-            'work_center_id' => $validated['work_center_id'],
+            'work_center_id' => $validated['work_center_id'] ?? null,
             'tanggal' => $validated['tanggal'],
             'shift' => $validated['shift'] ?? 'shift1',
             'target_mp' => $validated['target_mp'],
@@ -381,23 +379,28 @@ class LaporanHarianController extends Controller
             return back()->withErrors(['error' => 'Laporan yang sudah dikunci tidak bisa diupdate']);
         }
 
-        // Dependency check: filling must wait for mixing to be finished (End or Submitted)
         $processOrder = ['mixing' => 0, 'filling' => 1, 'secondary' => 2];
         $currentOrder = $processOrder[$laporanHarian->proses] ?? -1;
         if ($currentOrder > 0) {
             $prevProses = array_search($currentOrder - 1, $processOrder);
-            $prevLaporanExists = LaporanHarian::where('produk_id', $laporanHarian->produk_id)
+            $prevPlanExists = WeeklyPlan::where('produk_id', $laporanHarian->produk_id)
                 ->where('tanggal', $laporanHarian->tanggal)
                 ->where('proses', $prevProses)
-                ->where(function ($q) {
-                    $q->where('status', 'submitted')
-                        ->orWhere('timer_status', 'end');
-                })
                 ->exists();
-            if (! $prevLaporanExists) {
-                return back()->withErrors([
-                    'error' => ucfirst($prevProses).' harus diselesaikan terlebih dahulu sebelum memulai '.$laporanHarian->proses,
-                ]);
+            if ($prevPlanExists) {
+                $prevLaporanExists = LaporanHarian::where('produk_id', $laporanHarian->produk_id)
+                    ->where('tanggal', $laporanHarian->tanggal)
+                    ->where('proses', $prevProses)
+                    ->where(function ($q) {
+                        $q->where('status', 'submitted')
+                            ->orWhere('timer_status', 'end');
+                    })
+                    ->exists();
+                if (! $prevLaporanExists) {
+                    return back()->withErrors([
+                        'error' => ucfirst($prevProses).' harus diselesaikan terlebih dahulu sebelum memulai '.$laporanHarian->proses,
+                    ]);
+                }
             }
         }
 
