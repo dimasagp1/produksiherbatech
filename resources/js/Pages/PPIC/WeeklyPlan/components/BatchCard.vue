@@ -91,13 +91,7 @@ const typeLabel: Record<string, string> = {
     secondary: 'Secondary',
 };
 
-const targetDisplay = computed(() => {
-    const mp = props.plan.mp_count ?? 0;
-    const mult = props.plan.multiplier || props.multiplier;
-    if (props.plan.target_output && props.plan.target_output > 0)
-        return props.plan.target_output;
-    return mp * mult;
-});
+const targetDisplay = computed(() => props.plan.target_output ?? 0);
 
 const workCenter = computed(() => {
     if (props.plan.workCenter) return props.plan.workCenter;
@@ -179,10 +173,7 @@ const prosesColor: Record<string, string> = {
             <strong class="font-mono">{{
                 Number(targetDisplay).toLocaleString('id-ID')
             }}</strong>
-            <span v-if="(plan.mp_count ?? 0) > 0" class="text-gray-400">
-                ({{ plan.mp_count }} MP ×
-                {{ plan.multiplier || multiplier }})</span
-            >
+            pcs
         </p>
 
         <div

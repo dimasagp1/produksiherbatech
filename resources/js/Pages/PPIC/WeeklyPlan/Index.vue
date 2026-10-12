@@ -356,7 +356,6 @@ const createForm = useForm({
     proses: 'mixing',
     batch_number: '',
     tanggal: '',
-    mp_count: '',
     odoo_mo_id: null as number | null,
     mo_status: '',
 });
@@ -368,7 +367,6 @@ const editForm = useForm({
     proses: 'mixing',
     batch_number: '',
     tanggal: '',
-    mp_count: '',
 });
 
 function openCreate(date?: string) {
@@ -387,7 +385,6 @@ function openEdit(item: WeeklyPlan | BoardPlan) {
     editForm.proses = item.proses;
     editForm.batch_number = item.batch_number;
     editForm.tanggal = item.tanggal;
-    editForm.mp_count = item.mp_count != null ? String(item.mp_count) : '';
 }
 
 // Auto-fill logic when user chooses a product
@@ -437,10 +434,6 @@ function selectCreateBatch(b: OdooBatchOption) {
             createForm.work_center_id = String(wc.id);
         }
     }
-    if (b.target_output && Number(b.target_output) > 0) {
-        const recMp = Math.ceil(Number(b.target_output) / multiplier.value);
-        createForm.mp_count = String(recMp > 0 ? recMp : 1);
-    }
 }
 
 function selectEditBatch(b: OdooBatchOption) {
@@ -452,10 +445,6 @@ function selectEditBatch(b: OdooBatchOption) {
         if (wc) {
             editForm.work_center_id = String(wc.id);
         }
-    }
-    if (b.target_output && Number(b.target_output) > 0) {
-        const recMp = Math.ceil(Number(b.target_output) / multiplier.value);
-        editForm.mp_count = String(recMp > 0 ? recMp : 1);
     }
 }
 
@@ -534,12 +523,8 @@ function handleMoSynced() {
     router.reload();
 }
 
-function targetPreview(
-    mpCount: number | undefined | null,
-    planMultiplier?: number | null,
-): number {
-    const mp = Number(mpCount) || 0;
-    return mp * (planMultiplier || multiplier.value);
+function targetPreview(plan?: { target_output?: number | null } | null): number {
+    return Number(plan?.target_output ?? 0);
 }
 
 const typeColor: Record<string, string> = {
@@ -604,7 +589,7 @@ const workCenterTypeLabel: Record<string, string> = {
                     </div>
                     <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                         Perencanaan batch produksi mingguan oleh PPIC · Target =
-                        MP × {{ multiplier }}
+                        CT × jam shift × MP standar Work Center
                     </p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2.5">
@@ -796,7 +781,7 @@ const workCenterTypeLabel: Record<string, string> = {
                     <span class="mt-0.5 text-base">💡</span>
                     <div class="leading-relaxed">
                         <strong class="font-semibold text-indigo-900 dark:text-indigo-200">Panduan Pemetaan Batch Odoo:</strong>
-                        Cari batch yang ingin diproduksi minggu ini, klik <strong class="font-semibold underline">Edit</strong> untuk mengubah <em>Tanggal ke minggu berjalan</em>, memilih <em>Line Mesin</em>, mengisi <em>Jumlah MP</em>, lalu klik <strong class="font-semibold underline">Simpan & Aktifkan</strong>. Batch akan otomatis tampil di papan <strong>Board (Kanban)</strong>.
+                        Cari batch yang ingin diproduksi minggu ini, klik <strong class="font-semibold underline">Edit</strong> untuk mengubah <em>Tanggal ke minggu berjalan</em>, memilih <em>Line Mesin</em> dan <em>Work Center</em>, lalu klik <strong class="font-semibold underline">Simpan & Aktifkan</strong>. Batch akan otomatis tampil di papan <strong>Board (Kanban)</strong>.
                     </div>
                 </div>
 
@@ -1022,22 +1007,18 @@ const workCenterTypeLabel: Record<string, string> = {
                                         </span>
                                     </td>
 
-                                    <!-- MP & Target -->
+                                    <!-- Target -->
                                     <td class="whitespace-nowrap px-4 py-3">
                                         <div class="flex flex-col">
                                             <span class="font-mono text-xs font-semibold text-gray-900 dark:text-gray-100">
                                                 {{
-                                                    Number(
-                                                        plan.target_output ||
-                                                            targetPreview(
-                                                                plan.mp_count,
-                                                                plan.multiplier,
-                                                            ),
+                                                    targetPreview(
+                                                        plan,
                                                     ).toLocaleString('id-ID')
                                                 }} pcs
                                             </span>
                                             <span class="text-[10px] text-gray-400">
-                                                {{ plan.mp_count ?? 0 }} MP × {{ plan.multiplier || multiplier }}
+                                                {{ plan.mo_status ? 'MO: ' + plan.mo_status : 'rencana internal' }}
                                             </span>
                                         </div>
                                     </td>
@@ -1235,18 +1216,10 @@ const workCenterTypeLabel: Record<string, string> = {
                                 <div class="flex flex-col gap-1">
                                     <div class="text-[10px] text-gray-400">Target Output:</div>
                                     <div class="font-mono font-bold text-gray-900 dark:text-gray-100">
-                                        {{
-                                            Number(
-                                                plan.target_output ||
-                                                    targetPreview(
-                                                        plan.mp_count,
-                                                        plan.multiplier,
-                                                    ),
-                                            ).toLocaleString('id-ID')
-                                        }} pcs
+                                        {{ targetPreview(plan).toLocaleString('id-ID') }} pcs
                                     </div>
                                     <div class="text-[10px] text-gray-400">
-                                        {{ plan.mp_count ?? 0 }} MP | MO: <span class="uppercase font-semibold">{{ plan.mo_status ?? 'pending' }}</span>
+                                        MO: <span class="uppercase font-semibold">{{ plan.mo_status ?? 'pending' }}</span>
                                     </div>
                                 </div>
                             </div>
@@ -1612,25 +1585,11 @@ const workCenterTypeLabel: Record<string, string> = {
                     />
                 </div>
 
-                <div class="mb-4">
-                    <InputLabel value="Jumlah MP (Manpower)" />
-                    <TextInput
-                        v-model="createForm.mp_count"
-                        type="number"
-                        min="0"
-                        class="mt-1 block w-full font-mono"
-                        placeholder="0"
-                    />
-                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Target output otomatis:
-                        <strong class="text-indigo-600 dark:text-indigo-400">{{ Number(createForm.mp_count || 0) * multiplier }} pcs</strong> (MP
-                        × {{ multiplier }})
-                    </p>
-                    <InputError
-                        :message="createForm.errors.mp_count"
-                        class="mt-1"
-                    />
-                </div>
+                <p class="mb-4 rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-200">
+                    Target output dihitung otomatis dari
+                    <strong>Cycle Time × jam shift × MP standar</strong> Work
+                    Center. Jumlah MP aktual dicatat di Laporan Harian.
+                </p>
                 <div class="flex justify-end gap-2">
                     <SecondaryButton type="button" @click="showCreate = false"
                         >Batal</SecondaryButton
@@ -1884,30 +1843,6 @@ const workCenterTypeLabel: Record<string, string> = {
 
                     <InputError
                         :message="editForm.errors.batch_number"
-                        class="mt-1"
-                    />
-                </div>
-
-                <!-- Manpower Field -->
-                <div class="mb-4">
-                    <InputLabel value="Jumlah MP (Manpower)" />
-                    <TextInput
-                        v-model="editForm.mp_count"
-                        type="number"
-                        min="0"
-                        class="mt-1 block w-full font-mono"
-                    />
-                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Target output:
-                        <strong class="text-indigo-600 dark:text-indigo-400">
-                            {{
-                                Number(editForm.mp_count || 0) *
-                                (editItem.multiplier || multiplier)
-                            }} pcs
-                        </strong>
-                    </p>
-                    <InputError
-                        :message="editForm.errors.mp_count"
                         class="mt-1"
                     />
                 </div>

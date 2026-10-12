@@ -58,7 +58,9 @@ class WeeklyPlanController extends Controller
                 ->whereIn('status', ['draft', 'aktif'])
                 ->exists();
             if (! $prevExists) {
-                return back()->with('error', ucfirst($prevProses).' harus direncanakan terlebih dahulu sebelum '.ucfirst($validated['proses']).'.');
+                $msg = ucfirst($prevProses).' harus direncanakan terlebih dahulu sebelum '.ucfirst($validated['proses']).'.';
+
+                return back()->withErrors(['proses' => $msg])->with('error', $msg);
             }
         }
 
@@ -69,7 +71,7 @@ class WeeklyPlanController extends Controller
             ->first();
 
         $workCenter = ! empty($validated['work_center_id'] ?? null) ? WorkCenter::find($validated['work_center_id']) : null;
-        $mpCount = (int) ($validated['mp_count'] ?? 0);
+        $mpCount = (int) ($validated['mp_count'] ?? 0) ?: (int) ($workCenter?->fit_mp ?: 1);
         $targetOutput = ! empty($validated['target_output'])
             ? (int) $validated['target_output']
             : ($existingDraft?->target_output ?: ($workCenter ? TargetCalculationService::calculateTarget($workCenter, $mpCount) : $mpCount * (int) Setting::get('target_output_multiplier', 2000)));
@@ -189,7 +191,7 @@ class WeeklyPlanController extends Controller
             }
         }
 
-        $validated['mp_count'] = (int) ($validated['mp_count'] ?? $weeklyPlan->mp_count ?? 0);
+        $validated['mp_count'] = (int) ($validated['mp_count'] ?? $weeklyPlan->mp_count ?? 0) ?: (int) ($weeklyPlan->workCenter?->fit_mp ?: 1);
 
         // Auto-calculate target_output using Work Center CT if work_center_id provided
         if (isset($validated['work_center_id']) && $validated['work_center_id']) {
