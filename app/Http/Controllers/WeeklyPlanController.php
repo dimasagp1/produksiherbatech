@@ -58,9 +58,7 @@ class WeeklyPlanController extends Controller
                 ->whereIn('status', ['draft', 'aktif'])
                 ->exists();
             if (! $prevExists) {
-                return back()->withErrors([
-                    'proses' => ucfirst($prevProses).' harus direncanakan terlebih dahulu sebelum '.ucfirst($validated['proses']).'.',
-                ]);
+                return back()->with('error', ucfirst($prevProses).' harus direncanakan terlebih dahulu sebelum '.ucfirst($validated['proses']).'.');
             }
         }
 
@@ -96,16 +94,17 @@ class WeeklyPlanController extends Controller
             ->whereIn('status', ['draft', 'aktif'])
             ->exists();
         if ($isDuplicate) {
-            return back()->withErrors(['batch_number' => 'Batch number sudah digunakan pada tanggal tersebut.']);
+            return back()->with('error', 'Batch number sudah digunakan pada tanggal tersebut.');
         }
 
-        // Validasi: produk + tanggal maksimal 3 proses (mixing+filling+secondary) — hitung draft+aktif, ignore soft-deleted & selesai
+        // Validasi: produk + tanggal maksimal 3 jenis proses (mixing+filling+secondary) — hitung draft+aktif, ignore soft-deleted & selesai
         $existingCount = WeeklyPlan::where('produk_id', $validated['produk_id'])
             ->where('tanggal', $validated['tanggal'])
             ->whereIn('status', ['draft', 'aktif'])
-            ->count();
+            ->distinct()
+            ->count('proses');
         if ($existingCount >= 3) {
-            return back()->withErrors(['produk_id' => 'Produk tersebut pada tanggal ini sudah memiliki maksimal 3 proses.']);
+            return back()->with('error', 'Produk tersebut pada tanggal ini sudah memiliki maksimal 3 proses.');
         }
 
         // Validasi: proses tidak boleh duplikat untuk produk+tanggal yang sama (hanya hitung draft/aktif)
@@ -115,7 +114,7 @@ class WeeklyPlanController extends Controller
             ->whereIn('status', ['draft', 'aktif'])
             ->exists();
         if ($duplicateProses) {
-            return back()->withErrors(['proses' => 'Proses '.ucfirst($validated['proses']).' sudah ada untuk produk ini pada tanggal tersebut.']);
+            return back()->with('error', 'Proses '.ucfirst($validated['proses']).' sudah ada untuk produk ini pada tanggal tersebut.');
         }
 
         $validated['created_by'] = auth()->id();
@@ -139,7 +138,7 @@ class WeeklyPlanController extends Controller
         }
 
         if ($weeklyPlan->status !== 'draft') {
-            return back()->withErrors(['error' => 'Hanya plan draft yang bisa diupdate']);
+            return back()->with('error', 'Hanya plan draft yang bisa diupdate.');
         }
 
         $validated = $request->validate([
@@ -160,7 +159,7 @@ class WeeklyPlanController extends Controller
             ->where('id', '!=', $weeklyPlan->id)
             ->exists();
         if ($isDuplicate) {
-            return back()->withErrors(['batch_number' => 'Batch number sudah digunakan pada tanggal tersebut.']);
+            return back()->with('error', 'Batch number sudah digunakan pada tanggal tersebut.');
         }
 
         // Validasi max 3 jika produk/tanggal/proses berubah — exclude diri sendiri
@@ -173,9 +172,10 @@ class WeeklyPlanController extends Controller
                 ->where('tanggal', $validated['tanggal'])
                 ->whereIn('status', ['draft', 'aktif'])
                 ->where('id', '!=', $weeklyPlan->id)
-                ->count();
+                ->distinct()
+                ->count('proses');
             if ($existingCount >= 3) {
-                return back()->withErrors(['produk_id' => 'Produk tersebut pada tanggal ini sudah memiliki maksimal 3 proses.']);
+                return back()->with('error', 'Produk tersebut pada tanggal ini sudah memiliki maksimal 3 proses.');
             }
 
             $duplicateProses = WeeklyPlan::where('produk_id', $validated['produk_id'])
@@ -185,7 +185,7 @@ class WeeklyPlanController extends Controller
                 ->where('id', '!=', $weeklyPlan->id)
                 ->exists();
             if ($duplicateProses) {
-                return back()->withErrors(['proses' => 'Proses '.ucfirst($validated['proses']).' sudah ada untuk produk ini pada tanggal tersebut.']);
+                return back()->with('error', 'Proses '.ucfirst($validated['proses']).' sudah ada untuk produk ini pada tanggal tersebut.');
             }
         }
 
@@ -269,7 +269,7 @@ class WeeklyPlanController extends Controller
     public function destroy(WeeklyPlan $weeklyPlan)
     {
         if ($weeklyPlan->status !== 'draft') {
-            return back()->withErrors(['error' => 'Hanya plan draft yang bisa dihapus']);
+            return back()->with('error', 'Hanya plan draft yang bisa dihapus.');
         }
 
         $weeklyPlan->delete();
@@ -281,7 +281,7 @@ class WeeklyPlanController extends Controller
     public function activate(WeeklyPlan $weeklyPlan)
     {
         if ($weeklyPlan->status !== 'draft') {
-            return back()->withErrors(['error' => 'Hanya plan draft yang bisa diaktifkan']);
+            return back()->with('error', 'Hanya plan draft yang bisa diaktifkan.');
         }
 
         $data = ['status' => 'aktif'];

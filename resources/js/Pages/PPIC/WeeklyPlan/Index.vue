@@ -80,6 +80,11 @@ const props = defineProps<{
 }>();
 
 const flash = computed(() => (usePage().props as any).flash ?? {});
+const errorBag = computed(() => {
+    const errors = (usePage().props as any).errors ?? {};
+    return Object.values(errors).flat().filter(Boolean) as string[];
+});
+const topError = computed(() => flash.value.error ?? errorBag.value[0] ?? null);
 const multiplier = computed(() => props.targetOutputMultiplier ?? 2000);
 const activeTab = ref<'board' | 'table'>('board');
 const syncing = ref(false);
@@ -308,6 +313,42 @@ const paginatedTablePlans = computed(() => {
 const boardPlans = computed(() => props.weeklyPlans);
 
 // Forms
+const produkSearch = ref('');
+const produkDropdownOpen = ref(false);
+
+const filteredProduks = computed(() => {
+    const q = produkSearch.value.trim().toLowerCase();
+    const list = q
+        ? props.produks.filter(
+              (p) =>
+                  p.nama_produk.toLowerCase().includes(q) ||
+                  (p.kode_produk ?? '').toLowerCase().includes(q),
+          )
+        : props.produks;
+
+    return [...list].sort((a, b) =>
+        a.nama_produk.localeCompare(b.nama_produk, 'id'),
+    );
+});
+
+const selectedProduk = computed(() =>
+    props.produks.find((p) => p.id === Number(createForm.produk_id)),
+);
+
+function toggleProdukDropdown() {
+    produkDropdownOpen.value = !produkDropdownOpen.value;
+    if (produkDropdownOpen.value) {
+        produkSearch.value = '';
+    }
+}
+
+function chooseProduk(p: Produk) {
+    createForm.produk_id = String(p.id);
+    produkDropdownOpen.value = false;
+    produkSearch.value = '';
+    onProductChange();
+}
+
 const createForm = useForm({
     produk_id: '',
     line_id: '',
@@ -333,6 +374,8 @@ const editForm = useForm({
 function openCreate(date?: string) {
     createForm.reset();
     createForm.tanggal = date || formatDate(new Date());
+    produkSearch.value = '';
+    produkDropdownOpen.value = false;
     showCreate.value = true;
 }
 
@@ -620,15 +663,22 @@ const workCenterTypeLabel: Record<string, string> = {
                 </div>
             </div>
             <div
-                v-if="flash.error"
+                v-if="topError"
                 class="mb-4 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 shadow-sm dark:border-rose-800/80 dark:bg-rose-950/40 dark:text-rose-200"
             >
                 <div class="flex items-center gap-2">
-                    <svg class="h-5 w-5 text-rose-600 dark:text-rose-400" fill="currentColor" viewBox="0 0 20 20">
+                    <svg class="h-5 w-5 shrink-0 text-rose-600 dark:text-rose-400" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
                     </svg>
-                    <span>{{ flash.error }}</span>
+                    <span>{{ topError }}</span>
                 </div>
+                <button
+                    type="button"
+                    @click="openCreate()"
+                    class="shrink-0 rounded-lg border border-rose-300 bg-white px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-gray-800 dark:text-rose-300"
+                >
+                    Buka Form Create
+                </button>
             </div>
 
             <!-- TAB 1: BOARD VIEW (KANBAN) -->
@@ -1320,17 +1370,95 @@ const workCenterTypeLabel: Record<string, string> = {
                 </div>
                 <div class="mb-3">
                     <InputLabel value="Produk" />
-                    <select
-                        v-model="createForm.produk_id"
-                        @change="onProductChange"
-                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
-                        required
+                    <button
+                        type="button"
+                        @click="toggleProdukDropdown"
+                        class="mt-1 flex w-full items-center justify-between gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm shadow-sm hover:border-indigo-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                     >
-                        <option value="" disabled>Pilih Produk</option>
-                        <option v-for="p in produks" :key="p.id" :value="p.id">
-                            {{ p.nama_produk }} ({{ p.kode_produk }})
-                        </option>
-                    </select>
+                        <span
+                            :class="
+                                selectedProduk
+                                    ? 'text-gray-900 dark:text-gray-100'
+                                    : 'text-gray-400 dark:text-gray-500'
+                            "
+                        >
+                            {{
+                                selectedProduk
+                                    ? `${selectedProduk.nama_produk} (${selectedProduk.kode_produk})`
+                                    : 'Pilih Produk'
+                            }}
+                        </span>
+                        <svg
+                            class="h-4 w-4 shrink-0 text-gray-400 transition-transform"
+                            :class="produkDropdownOpen ? 'rotate-180' : ''"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M19 9l-7 7-7-7"
+                            />
+                        </svg>
+                    </button>
+
+                    <div v-if="produkDropdownOpen" class="relative mt-1">
+                        <div
+                            class="fixed inset-0 z-10"
+                            @click="produkDropdownOpen = false"
+                        ></div>
+                        <div
+                            class="relative z-20 rounded-md border border-gray-300 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                        >
+                            <div class="border-b border-gray-100 p-2 dark:border-gray-700">
+                                <input
+                                    v-model="produkSearch"
+                                    type="search"
+                                    placeholder="Cari nama atau kode produk..."
+                                    class="block w-full rounded-md border-gray-300 px-3 py-1.5 text-sm shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:placeholder:text-gray-500"
+                                />
+                                <p
+                                    class="mt-1 px-1 text-[10px] text-gray-500 dark:text-gray-400"
+                                >
+                                    Hanya produk aktif · {{ filteredProduks.length }} dari
+                                    {{ produks.length }} produk
+                                </p>
+                            </div>
+                            <ul
+                                class="max-h-56 overflow-y-auto py-1"
+                                role="listbox"
+                            >
+                                <li
+                                    v-for="p in filteredProduks"
+                                    :key="p.id"
+                                    role="option"
+                                    :aria-selected="
+                                        Number(createForm.produk_id) === p.id
+                                    "
+                                    @click="chooseProduk(p)"
+                                    class="cursor-pointer px-3 py-2 text-sm hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                                    :class="
+                                        Number(createForm.produk_id) === p.id
+                                            ? 'bg-indigo-50 font-semibold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200'
+                                            : 'text-gray-700 dark:text-gray-300'
+                                    "
+                                >
+                                    {{ p.nama_produk }}
+                                    <span class="font-mono text-[11px] text-gray-400"
+                                        >({{ p.kode_produk }})</span
+                                    >
+                                </li>
+                                <li
+                                    v-if="filteredProduks.length === 0"
+                                    class="px-3 py-4 text-center text-xs text-gray-400"
+                                >
+                                    Produk tidak ditemukan
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
                     <InputError
                         :message="createForm.errors.produk_id"
                         class="mt-1"
