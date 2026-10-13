@@ -119,17 +119,19 @@ const qualityInput = ref<string>('');
 
 // Timer display for current
 const timerDisplay = computed(() => {
-    const h = Math.floor(timerElapsed.value / 3600);
-    const m = Math.floor((timerElapsed.value % 3600) / 60);
-    const s = timerElapsed.value % 60;
+    const totalSecs = Math.max(0, Math.round(timerElapsed.value));
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = totalSecs % 60;
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 });
 
 // Downtime display (live saat pause)
 const downtimeDisplay = computed(() => {
-    const h = Math.floor(downtimeElapsed.value / 3600);
-    const m = Math.floor((downtimeElapsed.value % 3600) / 60);
-    const s = downtimeElapsed.value % 60;
+    const totalSecs = Math.max(0, Math.round(downtimeElapsed.value));
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = totalSecs % 60;
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 });
 
@@ -560,7 +562,9 @@ function startTimerLoop() {
             const diffSec = Math.floor(
                 (now.getTime() - startAt.getTime()) / 1000,
             );
-            const pauseSeconds = (props.laporan.total_pause_menit || 0) * 60;
+            const pauseSeconds = Math.round(
+                (props.laporan.total_pause_menit || 0) * 60,
+            );
             timerElapsed.value = Math.max(0, diffSec - pauseSeconds);
         } else if (props.laporan.start_time) {
             const startSeconds = parseTimeToSeconds(props.laporan.start_time);
@@ -570,7 +574,9 @@ function startTimerLoop() {
                 now.getSeconds();
             let diff = nowSeconds - startSeconds;
             if (diff < 0) diff += 24 * 3600;
-            const pauseSeconds = (props.laporan.total_pause_menit || 0) * 60;
+            const pauseSeconds = Math.round(
+                (props.laporan.total_pause_menit || 0) * 60,
+            );
             timerElapsed.value = Math.max(0, diff - pauseSeconds);
         }
     }
@@ -589,7 +595,9 @@ function stopTimerLoop() {
 
 function startDowntimeLoop() {
     stopDowntimeLoop();
-    const previousPause = (props.laporan.total_pause_menit || 0) * 60;
+    const previousPause = Math.round(
+        (props.laporan.total_pause_menit || 0) * 60,
+    );
     if (props.laporan.pause_started_at) {
         const pauseAt = new Date(props.laporan.pause_started_at);
         const now = new Date();
@@ -647,7 +655,9 @@ function handleTimerStatus() {
                 const diffSec = Math.floor(
                     (pauseAt.getTime() - startAt.getTime()) / 1000,
                 );
-                const totalPause = (props.laporan.total_pause_menit || 0) * 60;
+                const totalPause = Math.round(
+                    (props.laporan.total_pause_menit || 0) * 60,
+                );
                 timerElapsed.value = Math.max(0, diffSec - totalPause);
             } else if (props.laporan.start_time) {
                 const pauseAt = props.laporan.pause_started_at
@@ -662,7 +672,9 @@ function handleTimerStatus() {
                     pauseAt.getSeconds();
                 let diff = pauseSecondsAt - startSeconds;
                 if (diff < 0) diff += 24 * 3600;
-                const totalPause = (props.laporan.total_pause_menit || 0) * 60;
+                const totalPause = Math.round(
+                    (props.laporan.total_pause_menit || 0) * 60,
+                );
                 timerElapsed.value = Math.max(0, diff - totalPause);
             }
         }
@@ -676,13 +688,17 @@ function handleTimerStatus() {
             props.laporan.gross_time_menit !== null &&
             props.laporan.gross_time_menit !== undefined
         ) {
-            timerElapsed.value = props.laporan.gross_time_menit * 60;
+            timerElapsed.value = Math.round(
+                props.laporan.gross_time_menit * 60,
+            );
         } else if (props.laporan.start_time && props.laporan.end_time) {
             let startSec = parseTimeToSeconds(props.laporan.start_time);
             let endSec = parseTimeToSeconds(props.laporan.end_time);
             let diff = endSec - startSec;
             if (diff < 0) diff += 24 * 3600;
-            const totalPause = (props.laporan.total_pause_menit || 0) * 60;
+            const totalPause = Math.round(
+                (props.laporan.total_pause_menit || 0) * 60,
+            );
             timerElapsed.value = Math.max(0, diff - totalPause);
         }
     } else {

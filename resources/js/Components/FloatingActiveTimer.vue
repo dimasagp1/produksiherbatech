@@ -73,8 +73,9 @@ function updateElapsedTime() {
     }
 
     const status = activeProduction.value.timer_status;
-    const totalPauseSeconds =
-        (activeProduction.value.total_pause_menit || 0) * 60;
+    const totalPauseSeconds = Math.round(
+        (activeProduction.value.total_pause_menit || 0) * 60,
+    );
 
     if (activeProduction.value.start_time_at) {
         const startAt = new Date(activeProduction.value.start_time_at);
@@ -139,7 +140,7 @@ function stopTimerLoop() {
 }
 
 const formattedTimer = computed(() => {
-    const totalSecs = timerElapsed.value;
+    const totalSecs = Math.max(0, Math.round(timerElapsed.value));
     const h = Math.floor(totalSecs / 3600);
     const m = Math.floor((totalSecs % 3600) / 60);
     const s = totalSecs % 60;
