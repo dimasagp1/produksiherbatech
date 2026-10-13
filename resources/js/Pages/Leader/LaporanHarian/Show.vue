@@ -89,6 +89,13 @@ const props = defineProps<{
     mesins?: Mesin[];
     lines?: Line[];
     totalReject: number;
+    materialSupply?: {
+        id: number;
+        supply_number: string;
+        status: string;
+        required_date: string;
+        delivered_at?: string;
+    } | null;
 }>();
 
 // Timer state for current laporan
@@ -102,6 +109,7 @@ let downtimeInterval: number | null = null;
 
 // Alasan downtime input (wajib saat pause)
 const alasanDowntime = ref('');
+const alasanDowntimeId = ref<number | ''>('');
 
 // Output fisik for current laporan
 const outputFisik = ref<string>(String(props.laporan.output_fisik ?? ''));
@@ -437,10 +445,14 @@ function pauseTimer() {
 function resumeTimer() {
     router.post(
         route('leader.laporan-harian.timer.start', props.laporan.id),
-        { alasan_downtime: alasanDowntime.value },
+        {
+            alasan_downtime_id: alasanDowntimeId.value || null,
+            alasan_downtime: alasanDowntime.value,
+        },
         {
             onSuccess: () => {
                 alasanDowntime.value = '';
+                alasanDowntimeId.value = '';
             },
         },
     );
@@ -448,6 +460,7 @@ function resumeTimer() {
 function endTimer() {
     const payload: Record<string, any> = {};
     if (props.laporan.timer_status === 'pause') {
+        payload.alasan_downtime_id = alasanDowntimeId.value || null;
         payload.alasan_downtime = alasanDowntime.value;
     }
     router.post(
@@ -456,6 +469,7 @@ function endTimer() {
         {
             onSuccess: () => {
                 alasanDowntime.value = '';
+                alasanDowntimeId.value = '';
             },
         },
     );
@@ -499,10 +513,14 @@ function pauseTimerFor(id: number) {
 function resumeTimerFor(id: number) {
     router.post(
         route('leader.laporan-harian.timer.start', id),
-        { alasan_downtime: alasanDowntime.value },
+        {
+            alasan_downtime_id: alasanDowntimeId.value || null,
+            alasan_downtime: alasanDowntime.value,
+        },
         {
             onSuccess: () => {
                 alasanDowntime.value = '';
+                alasanDowntimeId.value = '';
             },
         },
     );
@@ -511,11 +529,13 @@ function endTimerFor(id: number) {
     const payload: Record<string, any> = {};
     const sibling = props.siblingLaporans.find((s) => s.id === id);
     if (sibling && sibling.timer_status === 'pause') {
+        payload.alasan_downtime_id = alasanDowntimeId.value || null;
         payload.alasan_downtime = alasanDowntime.value;
     }
     router.post(route('leader.laporan-harian.timer.end', id), payload, {
         onSuccess: () => {
             alasanDowntime.value = '';
+            alasanDowntimeId.value = '';
         },
     });
 }
@@ -1141,7 +1161,7 @@ function laporanTimerLabel(l: Laporan) {
                                 "
                                 type="button"
                                 size="sm"
-                                :disabled="!alasanDowntime.trim()"
+                                :disabled="!alasanDowntimeId && !alasanDowntime.trim()"
                                 >▶ Resume</PrimaryButton
                             >
                             <DangerButton
@@ -1172,18 +1192,31 @@ function laporanTimerLabel(l: Laporan) {
                             v-if="item.timer_status === 'pause'"
                             class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20"
                         >
-                            <InputLabel value="Alasan Downtime *" />
+                            <InputLabel value="Master Alasan Downtime *" />
+                            <select
+                                v-model="alasanDowntimeId"
+                                class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+                            >
+                                <option value="">-- Pilih Alasan Downtime --</option>
+                                <option
+                                    v-for="adt in props.alasanDowntimes"
+                                    :key="adt.id"
+                                    :value="adt.id"
+                                >
+                                    {{ adt.nama_alasan }}
+                                </option>
+                            </select>
+                            <InputLabel class="mt-2" value="Keterangan Tambahan" />
                             <input
                                 v-model="alasanDowntime"
                                 type="text"
                                 class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
-                                placeholder="Masukkan alasan downtime..."
-                                required
+                                placeholder="Keterangan detail downtime..."
                             />
                             <p
                                 class="mt-1 text-xs text-amber-600 dark:text-amber-400"
                             >
-                                Alasan wajib diisi sebelum Resume atau End.
+                                Pilih master alasan atau ketik keterangan sebelum Resume atau End.
                             </p>
                         </div>
                         <p
@@ -1300,6 +1333,29 @@ function laporanTimerLabel(l: Laporan) {
                                     class="mt-1 font-medium text-gray-900 dark:text-gray-100"
                                 >
                                     {{ laporan.user?.name }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-gray-500">Pasokan Bahan (H-1)</dt>
+                                <dd class="mt-1 font-medium">
+                                    <span
+                                        v-if="props.materialSupply?.status === 'delivered'"
+                                        class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300"
+                                    >
+                                        ✓ Siap di Lini
+                                    </span>
+                                    <span
+                                        v-else-if="props.materialSupply?.status === 'pending'"
+                                        class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+                                    >
+                                        ⏳ Menunggu Gudang
+                                    </span>
+                                    <span
+                                        v-else
+                                        class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                                    >
+                                        ℹ️ Belum Ada Form Supply
+                                    </span>
                                 </dd>
                             </div>
                         </dl>
@@ -1530,7 +1586,7 @@ function laporanTimerLabel(l: Laporan) {
                                         @click="resumeTimer"
                                         type="button"
                                         size="sm"
-                                        :disabled="!alasanDowntime.trim()"
+                                        :disabled="!alasanDowntimeId && !alasanDowntime.trim()"
                                     >
                                         ▶ Resume
                                     </PrimaryButton>
@@ -1553,18 +1609,31 @@ function laporanTimerLabel(l: Laporan) {
                                 v-if="laporan.timer_status === 'pause'"
                                 class="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20"
                             >
-                                <InputLabel value="Alasan Downtime *" />
+                                <InputLabel value="Master Alasan Downtime *" />
+                                <select
+                                    v-model="alasanDowntimeId"
+                                    class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+                                >
+                                    <option value="">-- Pilih Alasan Downtime --</option>
+                                    <option
+                                        v-for="adt in props.alasanDowntimes"
+                                        :key="adt.id"
+                                        :value="adt.id"
+                                    >
+                                        {{ adt.nama_alasan }}
+                                    </option>
+                                </select>
+                                <InputLabel class="mt-2" value="Keterangan Tambahan" />
                                 <input
                                     v-model="alasanDowntime"
                                     type="text"
                                     class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
-                                    placeholder="Masukkan alasan downtime..."
-                                    required
+                                    placeholder="Keterangan detail downtime..."
                                 />
                                 <p
                                     class="mt-1 text-xs text-amber-600 dark:text-amber-400"
                                 >
-                                    Alasan wajib diisi sebelum Resume atau End.
+                                    Pilih master alasan atau ketik keterangan sebelum Resume atau End.
                                 </p>
                             </div>
 

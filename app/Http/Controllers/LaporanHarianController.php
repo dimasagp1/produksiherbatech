@@ -5,10 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\AlasanDowntime;
 use App\Models\LaporanHarian;
 use App\Models\Line;
+use App\Models\MaterialSupply;
 use App\Models\Mesin;
 use App\Models\Produk;
 use App\Models\WeeklyPlan;
 use App\Models\WorkCenter;
+use App\Services\OeeCalculator;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -127,6 +129,21 @@ class LaporanHarianController extends Controller
         $mesin = Mesin::findOrFail($validated['mesin_id']);
         $workCenter = ! empty($validated['work_center_id'] ?? null) ? WorkCenter::find($validated['work_center_id']) : null;
 
+        if ($workCenter && $mesin->work_center_id && $mesin->work_center_id != $workCenter->id) {
+            return back()->withErrors([
+                'mesin_id' => 'Mesin '.$mesin->nama_mesin.' tidak terdaftar pada Work Center '.$workCenter->name.'.',
+            ]);
+        }
+
+        if (! empty($validated['line_id']) && $workCenter) {
+            $line = Line::find($validated['line_id']);
+            if ($line && ! $line->canRunWorkCenter($workCenter->type)) {
+                return back()->withErrors([
+                    'line_id' => 'Line '.$line->nama_line.' tidak kompatibel dengan Work Center '.$workCenter->name.'.',
+                ]);
+            }
+        }
+
         $laporan = LaporanHarian::create([
             'user_id' => auth()->id(),
             'weekly_plan_id' => $weeklyPlan->id,
@@ -181,8 +198,14 @@ class LaporanHarianController extends Controller
 
         $totalReject = $laporanHarian->rejectDetails()->sum('jumlah');
 
+        $materialSupply = MaterialSupply::with('items')
+            ->where('weekly_plan_id', $laporanHarian->weekly_plan_id)
+            ->latest()
+            ->first();
+
         return Inertia::render('Leader/LaporanHarian/Show', [
             'laporan' => $laporanHarian,
+            'materialSupply' => $materialSupply,
             'downtimeDetails' => $laporanHarian->downtimeDetails,
             'alasanDowntimes' => $alasanDowntimes,
             'siblingLaporans' => $siblingLaporans,
@@ -261,6 +284,19 @@ class LaporanHarianController extends Controller
         $mesin = Mesin::findOrFail($validated['mesin_id']);
         $workCenter = WorkCenter::findOrFail($validated['work_center_id']);
 
+        if ($mesin->work_center_id && $mesin->work_center_id != $workCenter->id) {
+            return back()->withErrors([
+                'mesin_id' => 'Mesin '.$mesin->nama_mesin.' tidak terdaftar pada Work Center '.$workCenter->name.'.',
+            ]);
+        }
+
+        $line = Line::find($validated['line_id']);
+        if ($line && ! $line->canRunWorkCenter($workCenter->type)) {
+            return back()->withErrors([
+                'line_id' => 'Line '.$line->nama_line.' tidak kompatibel dengan Work Center '.$workCenter->name.'.',
+            ]);
+        }
+
         // Calculate Gross Time (handles overnight shifts)
         $startMinutes = $this->timeToMinutes($validated['start_time']);
         $endMinutes = $this->timeToMinutes($validated['end_time']);
@@ -278,20 +314,21 @@ class LaporanHarianController extends Controller
             ]);
         }
 
-        $waktuBersih = max(0, $grossTimeMenit - $totalDowntime);
-
-        $totalReject = $laporanHarian->rejectDetails()->sum('jumlah');
-        $totalOutput = $validated['output_fisik'] + $totalReject;
-
-        $availability = $grossTimeMenit > 0 ? min(100, ($waktuBersih / $grossTimeMenit) * 100) : 0;
-        $performance = $waktuBersih > 0 ? min(100, ($validated['output_fisik'] * $mesin->effective_ct / $waktuBersih) * 100) : 0;
-        $quality = $totalOutput > 0 ? min(100, ($validated['output_fisik'] / $totalOutput) * 100) : 0;
-        $oee = min(100, ($availability / 100) * ($performance / 100) * ($quality / 100) * 100);
-        $targetTotal = $validated['target_mp'] * $validated['total_mp'];
-        $produktivitas = $targetTotal > 0 ? ($validated['output_fisik'] / $targetTotal) * 100 : 0;
-
+        $totalReject = (int) $laporanHarian->rejectDetails()->sum('jumlah');
         $qualityInput = $validated['quality_input_persen'] ?? null;
-        $qualityMethod = $validated['quality_method'] ?? 'auto';
+        $qualityMethod = $validated['quality_method'] ?? ($qualityInput !== null ? 'manual' : 'auto');
+
+        $oeeMetrics = OeeCalculator::calculate(
+            grossTimeMenit: (float) $grossTimeMenit,
+            totalDowntimeMenit: (float) $totalDowntime,
+            outputFisik: (int) $validated['output_fisik'],
+            totalReject: $totalReject,
+            ctSeconds: (float) $mesin->effective_ct,
+            manualQuality: $qualityMethod === 'manual' ? (float) $qualityInput : null,
+        );
+
+        $targetTotal = $validated['target_mp'] * $validated['total_mp'];
+        $produktivitas = $targetTotal > 0 ? min(999.99, ($validated['output_fisik'] / $targetTotal) * 100) : 0;
 
         $laporanHarian->update([
             'weekly_plan_id' => $weeklyPlan->id,
@@ -311,12 +348,12 @@ class LaporanHarianController extends Controller
             'gross_time_menit' => $grossTimeMenit,
             'capacity_fisik' => $validated['capacity_fisik'],
             'output_fisik' => $validated['output_fisik'],
-            'waktu_bersih_menit' => $waktuBersih,
-            'target_teoritis' => $waktuBersih * $mesin->effective_ct,
-            'yield_persen' => $quality,
-            'availability_persen' => $availability,
-            'performance_persen' => $performance,
-            'oee_persen' => $oee,
+            'waktu_bersih_menit' => $oeeMetrics['waktu_bersih_menit'],
+            'target_teoritis' => $oeeMetrics['target_teoritis'],
+            'yield_persen' => $oeeMetrics['quality_persen'],
+            'availability_persen' => $oeeMetrics['availability_persen'],
+            'performance_persen' => $oeeMetrics['performance_persen'],
+            'oee_persen' => $oeeMetrics['oee_persen'],
             'produktivitas_persen' => $produktivitas,
             'status' => 'submitted',
             'quality_input_persen' => $qualityInput,
@@ -407,8 +444,19 @@ class LaporanHarianController extends Controller
         // Accumulate current pause session before resuming
         if ($laporanHarian->timer_status === 'pause' && $laporanHarian->pause_started_at) {
             $request->validate([
-                'alasan_downtime' => 'required|string|min:3',
+                'alasan_downtime' => 'required_without:alasan_downtime_id|nullable|string',
+                'alasan_downtime_id' => 'required_without:alasan_downtime|nullable|exists:alasan_downtimes,id',
             ]);
+
+            $alasanId = $request->input('alasan_downtime_id');
+            $keterangan = $request->input('alasan_downtime');
+            if ($alasanId && empty($keterangan)) {
+                $alasanObj = AlasanDowntime::find($alasanId);
+                $keterangan = $alasanObj?->nama_alasan ?? 'Downtime';
+            }
+            if (empty($keterangan)) {
+                $keterangan = 'Downtime';
+            }
 
             $pauseStartedAt = $laporanHarian->pause_started_at instanceof Carbon
                 ? $laporanHarian->pause_started_at
@@ -426,9 +474,9 @@ class LaporanHarianController extends Controller
 
             // Simpan downtime detail (pause = downtime)
             $laporanHarian->downtimeDetails()->create([
-                'alasan_downtime_id' => null,
+                'alasan_downtime_id' => $alasanId,
                 'durasi_menit' => $pauseDuration,
-                'keterangan' => $request->input('alasan_downtime'),
+                'keterangan' => $keterangan,
             ]);
         } else {
             // Draft → Start: selalu pakai jam real-time saat klik
@@ -438,6 +486,13 @@ class LaporanHarianController extends Controller
                 'start_time_at' => now()->toIso8601String(),
                 'pause_started_at' => null,
             ]);
+
+            $materialSupply = MaterialSupply::where('weekly_plan_id', $laporanHarian->weekly_plan_id)->latest()->first();
+            if ($materialSupply && $materialSupply->status !== 'delivered') {
+                return redirect()->back()
+                    ->with('success', 'Timer dimulai')
+                    ->with('warning', 'Perhatian: Status pasokan bahan baku H-1 masih '.strtoupper($materialSupply->status).'. Pastikan fisik material telah diserahterimakan.');
+            }
         }
 
         return redirect()->back()->with('success', 'Timer dimulai');
@@ -500,8 +555,19 @@ class LaporanHarianController extends Controller
         $totalPauseMenit = (float) ($laporanHarian->total_pause_menit ?? 0);
         if ($laporanHarian->timer_status === 'pause' && $laporanHarian->pause_started_at) {
             $request->validate([
-                'alasan_downtime' => 'required|string|min:3',
+                'alasan_downtime' => 'required_without:alasan_downtime_id|nullable|string',
+                'alasan_downtime_id' => 'required_without:alasan_downtime|nullable|exists:alasan_downtimes,id',
             ]);
+
+            $alasanId = $request->input('alasan_downtime_id');
+            $keterangan = $request->input('alasan_downtime');
+            if ($alasanId && empty($keterangan)) {
+                $alasanObj = AlasanDowntime::find($alasanId);
+                $keterangan = $alasanObj?->nama_alasan ?? 'Downtime';
+            }
+            if (empty($keterangan)) {
+                $keterangan = 'Downtime';
+            }
 
             $pauseStartedAt = $laporanHarian->pause_started_at instanceof Carbon
                 ? $laporanHarian->pause_started_at
@@ -512,9 +578,9 @@ class LaporanHarianController extends Controller
 
             // Simpan downtime detail (pause = downtime)
             $laporanHarian->downtimeDetails()->create([
-                'alasan_downtime_id' => null,
+                'alasan_downtime_id' => $alasanId,
                 'durasi_menit' => $pauseDuration,
-                'keterangan' => $request->input('alasan_downtime'),
+                'keterangan' => $keterangan,
             ]);
         }
 
@@ -603,17 +669,19 @@ class LaporanHarianController extends Controller
             $totalDowntime = $grossTimeMenit;
         }
 
-        $waktuBersih = max(0, $grossTimeMenit - $totalDowntime);
         $capacityFisik = $validated['capacity_fisik'];
         $outputFisik = $validated['output_fisik'];
+        $totalReject = (int) $laporanHarian->rejectDetails()->sum('jumlah');
 
-        $totalReject = $laporanHarian->rejectDetails()->sum('jumlah');
-        $totalOutput = $outputFisik + $totalReject;
+        $oeeMetrics = OeeCalculator::calculate(
+            grossTimeMenit: (float) $grossTimeMenit,
+            totalDowntimeMenit: (float) $totalDowntime,
+            outputFisik: (int) $outputFisik,
+            totalReject: $totalReject,
+            ctSeconds: (float) $mesin->effective_ct,
+            manualQuality: null,
+        );
 
-        $availability = $grossTimeMenit > 0 ? min(100, ($waktuBersih / $grossTimeMenit) * 100) : 0;
-        $performance = $waktuBersih > 0 ? min(100, ($outputFisik * $mesin->effective_ct / $waktuBersih) * 100) : 0;
-        $quality = $totalOutput > 0 ? min(100, ($outputFisik / $totalOutput) * 100) : 0;
-        $oee = min(100, ($availability / 100) * ($performance / 100) * ($quality / 100) * 100);
         $targetTotal = $targetMp * $totalMp;
         $produktivitas = $targetTotal > 0 ? min(999.99, ($outputFisik / $targetTotal) * 100) : 0;
 
@@ -625,14 +693,14 @@ class LaporanHarianController extends Controller
             'total_mp' => $totalMp,
             'capacity_fisik' => $capacityFisik,
             'output_fisik' => $outputFisik,
-            'waktu_bersih_menit' => $waktuBersih,
-            'target_teoritis' => $waktuBersih * $mesin->effective_ct,
-            'yield_persen' => $quality,
+            'waktu_bersih_menit' => $oeeMetrics['waktu_bersih_menit'],
+            'target_teoritis' => $oeeMetrics['target_teoritis'],
+            'yield_persen' => $oeeMetrics['quality_persen'],
             'quality_input_persen' => null,
             'quality_method' => 'auto',
-            'availability_persen' => $availability,
-            'performance_persen' => $performance,
-            'oee_persen' => $oee,
+            'availability_persen' => $oeeMetrics['availability_persen'],
+            'performance_persen' => $oeeMetrics['performance_persen'],
+            'oee_persen' => $oeeMetrics['oee_persen'],
             'produktivitas_persen' => $produktivitas,
             'status' => 'submitted',
         ]);
@@ -655,9 +723,24 @@ class LaporanHarianController extends Controller
             'quality_input_persen' => 'required|numeric|min:0|max:100',
         ]);
 
+        $mesin = $laporanHarian->mesin;
+        $effectiveCt = (float) ($mesin?->effective_ct ?: ($laporanHarian->ct ?: 0));
+        $totalReject = (int) $laporanHarian->rejectDetails()->sum('jumlah');
+
+        $oeeMetrics = OeeCalculator::calculate(
+            grossTimeMenit: (float) ($laporanHarian->gross_time_menit ?? 0),
+            totalDowntimeMenit: (float) ($laporanHarian->total_pause_menit ?? 0),
+            outputFisik: (int) ($laporanHarian->output_fisik ?? 0),
+            totalReject: $totalReject,
+            ctSeconds: $effectiveCt,
+            manualQuality: (float) $validated['quality_input_persen'],
+        );
+
         $laporanHarian->update([
             'quality_input_persen' => $validated['quality_input_persen'],
             'quality_method' => 'manual',
+            'yield_persen' => $oeeMetrics['quality_persen'],
+            'oee_persen' => $oeeMetrics['oee_persen'],
         ]);
 
         return redirect()->back()->with('success', 'Quality % berhasil diperbarui');

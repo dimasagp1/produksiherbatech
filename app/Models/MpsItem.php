@@ -102,10 +102,12 @@ class MpsItem extends Model
             return 0;
         }
 
-        $hours = $this->isSaturday() ? $wc->saturday_shift_hours : $wc->shift_hours;
+        $hours = $this->isSaturday() ? ($wc->saturday_shift_hours ?: $wc->shift_hours) : $wc->shift_hours;
         $outputPerMinute = 60 / $wc->standard_ct_seconds;
+        $fitMp = $wc->fit_mp > 0 ? $wc->fit_mp : 1;
+        $targetPerPerson = ($outputPerMinute * $hours * 60) / $fitMp;
 
-        return (int) round($outputPerMinute * $hours * 60 * $this->mp_count);
+        return (int) round($targetPerPerson * $this->mp_count);
     }
 
     /**

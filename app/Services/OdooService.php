@@ -989,17 +989,72 @@ class OdooService
         ];
 
         try {
-            return $this->searchRead('sale.order', $domain, [
-                'id', 'name', 'partner_id', 'date_order', 'amount_untaxed', 'amount_total', 'state',
+            $orders = $this->searchRead('sale.order', $domain, [
+                'id', 'name', 'partner_id', 'date_order', 'amount_untaxed', 'amount_total', 'state', 'order_line',
             ], 200);
         } catch (Exception $e) {
             // delivery_status field optional di beberapa Odoo — fallback tanpa domain itu
             if (str_contains($e->getMessage(), 'delivery_status')) {
-                return $this->searchRead('sale.order', [['state', 'in', ['sale', 'done']]], [
-                    'id', 'name', 'partner_id', 'date_order', 'amount_untaxed', 'amount_total', 'state',
+                $orders = $this->searchRead('sale.order', [['state', 'in', ['sale', 'done']]], [
+                    'id', 'name', 'partner_id', 'date_order', 'amount_untaxed', 'amount_total', 'state', 'order_line',
                 ], 200);
+            } else {
+                throw $e;
             }
-            throw $e;
+        }
+
+        // Fetch line items jika ada order_line
+        $allLineIds = collect($orders)->flatMap(fn ($o) => $o['order_line'] ?? [])->filter()->unique()->values()->all();
+        $linesById = [];
+        if (! empty($allLineIds)) {
+            try {
+                $lines = $this->searchRead('sale.order.line', [['id', 'in', $allLineIds]], [
+                    'id', 'order_id', 'product_id', 'name', 'product_uom_qty', 'product_uom',
+                ], 1000);
+                foreach ($lines as $line) {
+                    $linesById[$line['id']] = $line;
+                }
+            } catch (Exception $e) {
+                Log::warning('Failed fetching sale.order.line: '.$e->getMessage());
+            }
+        }
+
+        foreach ($orders as &$order) {
+            $orderLines = [];
+            foreach ($order['order_line'] ?? [] as $lineId) {
+                if (isset($linesById[$lineId])) {
+                    $orderLines[] = $linesById[$lineId];
+                }
+            }
+            $order['lines'] = $orderLines;
+        }
+
+        return $orders;
+    }
+
+    /**
+     * Fetch incoming Purchase Orders from Odoo for MRP calculation.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchIncomingPurchaseOrders(): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        try {
+            $domain = [
+                ['state', 'in', ['purchase', 'done']],
+            ];
+
+            return $this->searchRead('purchase.order.line', $domain, [
+                'id', 'order_id', 'product_id', 'name', 'product_qty', 'qty_received', 'product_uom', 'date_planned',
+            ], 500);
+        } catch (Exception $e) {
+            Log::warning('Odoo fetchIncomingPurchaseOrders error: '.$e->getMessage());
+
+            return [];
         }
     }
 

@@ -85,7 +85,7 @@ class DashboardController extends Controller
             ->get();
         $downtimePareto = $todayLaporansWithDowntime->flatMap(fn ($l) => $l->downtimeDetails)
             ->filter(fn ($d) => ($d->durasi_menit ?? 0) > 0)
-            ->groupBy(fn ($d) => $d->keterangan ?? 'Lainnya')
+            ->groupBy(fn ($d) => $d->alasanDowntime?->nama_alasan ?? $d->keterangan ?? 'Lainnya')
             ->map(fn ($group) => $group->sum('durasi_menit'))
             ->sortDesc();
 

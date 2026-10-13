@@ -78,6 +78,11 @@ class WeeklyPlan extends Model
         return $this->hasMany(LaporanHarian::class);
     }
 
+    public function materialSupplies(): HasMany
+    {
+        return $this->hasMany(MaterialSupply::class);
+    }
+
     public function scopeAktif($query)
     {
         return $query->where('status', 'aktif');

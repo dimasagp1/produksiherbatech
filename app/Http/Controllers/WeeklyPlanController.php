@@ -71,6 +71,14 @@ class WeeklyPlanController extends Controller
             ->first();
 
         $workCenter = ! empty($validated['work_center_id'] ?? null) ? WorkCenter::find($validated['work_center_id']) : null;
+        if (! empty($validated['line_id']) && $workCenter) {
+            $line = Line::find($validated['line_id']);
+            if ($line && ! $line->canRunWorkCenter($workCenter->type)) {
+                return back()->withErrors(['line_id' => "Line {$line->nama_line} tidak kompatibel dengan Work Center {$workCenter->name} ({$workCenter->type})."])
+                    ->with('error', "Line {$line->nama_line} tidak kompatibel dengan Work Center {$workCenter->name} ({$workCenter->type}).");
+            }
+        }
+
         $mpCount = (int) ($validated['mp_count'] ?? 0) ?: (int) ($workCenter?->fit_mp ?: 1);
         $targetOutput = ! empty($validated['target_output'])
             ? (int) $validated['target_output']

@@ -8,6 +8,7 @@ use App\Models\Bom;
 use App\Models\InventoryStock;
 use App\Models\MaterialUsage;
 use App\Models\Produk;
+use App\Models\ScmUom;
 use App\Models\Setting;
 use App\Models\WeeklyPlan;
 use App\Services\OdooService;
@@ -146,8 +147,15 @@ class MaterialUsageController extends Controller
                     'uom_id' => $item['uom_id'] ?? null,
                 ]);
 
-                // Stock ledger: kurangi stok material terpakai
+                // Stock ledger: kurangi stok material terpakai dengan konversi UOM
                 if (($item['produk_id'] ?? null) && $used > 0) {
+                    $matProd = Produk::with('uom')->find($item['produk_id']);
+                    $itemUom = ! empty($item['uom_id']) ? ScmUom::find($item['uom_id'])?->code : null;
+                    $usageUomCode = $itemUom ?: ($matProd?->uom?->code ?: $matProd?->odoo_uom);
+                    $stockUomCode = $matProd?->uom?->code ?: ($matProd?->odoo_uom ?: $usageUomCode);
+
+                    $usedInStockUom = $this->convertToStockUom($used, $usageUomCode, $stockUomCode);
+
                     $stock = InventoryStock::where('produk_id', $item['produk_id'])
                         ->where('batch_number', $plan->batch_number)
                         ->lockForUpdate()
@@ -155,11 +163,12 @@ class MaterialUsageController extends Controller
                         ?? InventoryStock::where('produk_id', $item['produk_id'])->orderBy('quantity', 'desc')->lockForUpdate()->first();
 
                     if ($stock) {
-                        $stock->decrement('quantity', $used);
+                        $newQty = max(0, (float) $stock->quantity - $usedInStockUom);
+                        $stock->update(['quantity' => $newQty]);
                     } else {
                         InventoryStock::create([
                             'produk_id' => $item['produk_id'],
-                            'quantity' => -$used,
+                            'quantity' => 0,
                             'batch_number' => $plan->batch_number,
                             'location' => 'GUDANG-UTAMA',
                         ]);
@@ -374,5 +383,41 @@ class MaterialUsageController extends Controller
         } catch (\Exception $e) {
             return back()->with('error', 'Gagal sync Material Usage Odoo: '.$e->getMessage());
         }
+    }
+
+    /**
+     * Convert quantity between units of measurement (e.g., g to kg, ml to l).
+     */
+    private function convertToStockUom(float $quantity, ?string $fromUom, ?string $toUom): float
+    {
+        if (empty($fromUom) || empty($toUom) || strcasecmp($fromUom, $toUom) === 0) {
+            return $quantity;
+        }
+
+        $from = strtolower(trim($fromUom));
+        $to = strtolower(trim($toUom));
+
+        $weightFactors = [
+            'g' => 1.0, 'gram' => 1.0, 'gr' => 1.0,
+            'kg' => 1000.0, 'kilogram' => 1000.0,
+            'mg' => 0.001,
+        ];
+        if (isset($weightFactors[$from]) && isset($weightFactors[$to])) {
+            $inGrams = $quantity * $weightFactors[$from];
+
+            return $inGrams / $weightFactors[$to];
+        }
+
+        $volFactors = [
+            'ml' => 1.0,
+            'l' => 1000.0, 'liter' => 1000.0, 'ltr' => 1000.0,
+        ];
+        if (isset($volFactors[$from]) && isset($volFactors[$to])) {
+            $inMl = $quantity * $volFactors[$from];
+
+            return $inMl / $volFactors[$to];
+        }
+
+        return $quantity;
     }
 }

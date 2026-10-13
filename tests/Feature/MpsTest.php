@@ -286,9 +286,9 @@ class MpsTest extends TestCase
         $response->assertOk();
         $item->refresh();
 
-        // Target should recalculate: (60/3) * 6.5 * 60 * 8 = 62400
+        // Target should recalculate: ((60/3) * 6.5 * 60 / 4) * 8 = 15600
         $this->assertNotEquals($oldTarget, $item->target_qty);
-        $this->assertEquals(62400, $item->target_qty);
+        $this->assertEquals(15600, $item->target_qty);
     }
 
     public function test_cleaning_flag_skips_weekly_plan_generation()
@@ -370,7 +370,7 @@ class MpsTest extends TestCase
         $this->assertEquals($this->lineA->id, $wp->line_id);
         $this->assertEquals($this->wcMixing->id, $wp->work_center_id);
         $this->assertEquals('shift1', $wp->shift);
-        $this->assertEquals(31200, $wp->target_output);
+        $this->assertEquals(7800, $wp->target_output);
         $this->assertEquals(4, $wp->mp_count);
         $this->assertEquals('draft', $wp->status);
         $this->assertEquals('mixing', $wp->proses);
@@ -542,7 +542,8 @@ class MpsTest extends TestCase
         ]);
 
         $item->recalculateTarget();
-        $this->assertEquals(31200, $item->target_qty);
+        // Mixing: 20 pcs/min * 6.5h * 60 = 7800 pcs (fit_mp = 4, mp_count = 4)
+        $this->assertEquals(7800, $item->target_qty);
     }
 
     public function test_saturday_uses_saturday_shift_hours()
@@ -567,9 +568,8 @@ class MpsTest extends TestCase
 
         // Saturday: shift_hours = 4.0 (saturday_shift_hours)
         // output/min = 20
-        // per shift = 20 * 60 * 4.0 = 4800
-        // total = 4800 * 4 = 19200
-        $this->assertEquals(19200, $item->target_qty);
+        // per shift = 20 * 60 * 4.0 = 4800 (fit_mp = 4, mp_count = 4)
+        $this->assertEquals(4800, $item->target_qty);
         $this->assertTrue($item->isSaturday());
     }
 
@@ -590,15 +590,15 @@ class MpsTest extends TestCase
             'shift' => 'shift1',
             'mp_count' => 4,
             'cleaning' => false,
-            'target_qty' => 31200,
-            'adjusted_qty' => 32000,
+            'target_qty' => 7800,
+            'adjusted_qty' => 8000,
         ]);
 
-        $this->assertEquals(800, $item->gap_qty); // 32000 - 31200
+        $this->assertEquals(200, $item->gap_qty); // 8000 - 7800
 
         // Negative gap
-        $item->adjusted_qty = 30000;
-        $this->assertEquals(-1200, $item->gap_qty);
+        $item->adjusted_qty = 7000;
+        $this->assertEquals(-800, $item->gap_qty);
 
         // Null adjusted_qty
         $item->adjusted_qty = null;

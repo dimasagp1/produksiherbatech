@@ -36,6 +36,17 @@ class MrpCalculationService
         $critical = 0;
         $warning = 0;
         $ok = 0;
+
+        $incomingPoLines = [];
+        try {
+            $odooService = app(OdooService::class);
+            if ($odooService->isConfigured()) {
+                $incomingPoLines = $odooService->fetchIncomingPurchaseOrders();
+            }
+        } catch (\Throwable $e) {
+            // Silently fallback if Odoo is unavailable
+        }
+
         foreach ($allMaterials as $mat) {
             $matProdukId = $mat['material_produk_id'] ?? null;
             $matName = $mat['material_name'];
@@ -44,6 +55,8 @@ class MrpCalculationService
             $qtyPerUnitBase = (float) ($mat['quantity_per_unit'] ?? 0);
             $begin = 0;
             $rop = 0;
+            $stockFactor = 1;
+            $matProd = null;
             if ($matProdukId) {
                 $matProd = Produk::with('uom')->find($matProdukId);
                 $stockQty = (float) InventoryStock::where('produk_id', $matProdukId)->sum('quantity');
@@ -69,6 +82,15 @@ class MrpCalculationService
             }
             $needed = $neededBase;
             $incoming = 0;
+            if ($matProdukId && ! empty($incomingPoLines)) {
+                foreach ($incomingPoLines as $poLine) {
+                    $odooProdId = is_array($poLine['product_id'] ?? null) ? $poLine['product_id'][0] : null;
+                    if ($odooProdId && $matProd?->odoo_product_id == $odooProdId) {
+                        $qtyRemaining = max(0, (float) ($poLine['product_qty'] ?? 0) - (float) ($poLine['qty_received'] ?? 0));
+                        $incoming += ($qtyRemaining * $stockFactor);
+                    }
+                }
+            }
             $available = $begin + $incoming;
             $shortage = max(0, $needed + $rop - $available);
             if ($shortage > 0 && $rop > 0 && $available < $rop) {

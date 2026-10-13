@@ -20,14 +20,10 @@ class TargetCalculationService
             return 0;
         }
 
-        $ctSeconds = $workCenter->standard_ct_seconds;
-        if ($ctSeconds <= 0) {
+        $targetPerPerson = self::calculateTargetPerPerson($workCenter);
+        if ($targetPerPerson <= 0) {
             return 0;
         }
-
-        $outputPerMinute = 60 / $ctSeconds;
-        $minutesPerShift = $workCenter->shift_hours * 60;
-        $targetPerPerson = $outputPerMinute * $minutesPerShift;
 
         return (int) round($targetPerPerson * $mpCount);
     }
@@ -47,8 +43,10 @@ class TargetCalculationService
 
         $outputPerMinute = 60 / $ctSeconds;
         $minutesPerShift = $workCenter->shift_hours * 60;
+        $lineTarget = $outputPerMinute * $minutesPerShift;
+        $fitMp = $workCenter->fit_mp > 0 ? $workCenter->fit_mp : 1;
 
-        return round($outputPerMinute * $minutesPerShift, 2);
+        return round($lineTarget / $fitMp, 2);
     }
 
     /**
