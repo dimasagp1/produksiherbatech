@@ -11,6 +11,7 @@ use App\Models\Produk;
 use App\Models\ScmUom;
 use App\Models\Setting;
 use App\Models\WeeklyPlan;
+use App\Services\InventoryLedgerGuard;
 use App\Services\OdooService;
 use App\Services\ScmNumberService;
 use App\Services\UsageRatioService;
@@ -114,6 +115,13 @@ class MaterialUsageController extends Controller
         ]);
 
         $plan = WeeklyPlan::findOrFail($validated['weekly_plan_id']);
+
+        if (InventoryLedgerGuard::isLocationFrozen('GUDANG-UTAMA')) {
+            return back()->withErrors([
+                'error' => 'Lokasi GUDANG-UTAMA sedang dalam proses Stock Opname fisik aktif. Mutasi pemakaian bahan ditangguhkan hingga Opname selesai.',
+            ]);
+        }
+
         $bom = Bom::with('items')->where('produk_id', $plan->produk_id)->where('is_active', true)->first();
 
         $usage = DB::transaction(function () use ($validated, $plan, $bom) {

@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\Odoo\PushRejectToOdooJob;
 use App\Models\LaporanHarian;
 use App\Models\Produk;
 use App\Models\RejectDetail;
+use App\Services\Odoo\OdooOutbox;
 use App\Services\OdooService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -234,8 +236,8 @@ class RejectController extends Controller
         $alasan = trim($validated['alasan_reject']);
 
         try {
-            DB::transaction(function () use ($laporan, $jenisToStore, $validated, $alasan, $user) {
-                RejectDetail::create([
+            $createdReject = DB::transaction(function () use ($laporan, $jenisToStore, $validated, $alasan, $user) {
+                return RejectDetail::create([
                     'laporan_harian_id' => $laporan->id,
                     'material_name' => $laporan->produk?->nama_produk ?? 'Produk Jadi',
                     'material_uom' => $laporan->produk?->odoo_uom ?: 'Pcs',
@@ -247,8 +249,15 @@ class RejectController extends Controller
                     'created_by' => $user->id,
                 ]);
             });
+
+            // Enqueue & dispatch job outbox push reject ke Odoo Scrap
+            $syncJob = OdooOutbox::enqueue('reject_detail', $createdReject->id, 'push_reject', [
+                'reject_detail_id' => $createdReject->id,
+            ], 'stock.scrap');
+
+            PushRejectToOdooJob::dispatch($syncJob->id)->afterCommit();
         } catch (\Throwable $e) {
-            return back()->withErrors(['error' => 'Gagal menyimpan data reject. Silakan coba lagi.']);
+            return back()->withErrors(['error' => 'Gagal menyimpan data reject: '.$e->getMessage()]);
         }
 
         return back()->with('success', 'Reject produk berhasil disimpan.');

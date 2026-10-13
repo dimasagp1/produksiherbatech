@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\BrandingSettingController;
 use App\Http\Controllers\Admin\FinanceSettingController;
 use App\Http\Controllers\Admin\HistoryController;
@@ -86,6 +87,7 @@ Route::middleware(['auth', 'role:superadmin|admin|manager'])->prefix('admin')->n
     Route::resource('users', UserController::class);
     Route::patch('users/{user}/toggle-active', [UserController::class, 'toggleActive'])->name('users.toggle-active');
     Route::get('/history', [HistoryController::class, 'index'])->name('history.index');
+    Route::get('/audit-log', [AuditLogController::class, 'index'])->name('audit-log.index');
     Route::resource('work-center', WorkCenterController::class);
 });
 

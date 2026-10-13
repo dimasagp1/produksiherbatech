@@ -8,6 +8,7 @@ use App\Models\MaterialScrap;
 use App\Models\MaterialUsage;
 use App\Models\Produk;
 use App\Models\ScmUom;
+use App\Services\InventoryLedgerGuard;
 use App\Services\OdooService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -101,8 +102,14 @@ class InventoryController extends Controller
             'notes' => 'nullable|string',
         ]);
 
-        $location = $validated['location'] ?: 'GUDANG-UTAMA';
-        $batch = $validated['batch_number'] ?: null;
+        $location = $validated['location'] ?? 'GUDANG-UTAMA';
+        $batch = $validated['batch_number'] ?? null;
+
+        if (InventoryLedgerGuard::isLocationFrozen($location)) {
+            return back()->withErrors([
+                'location' => "Lokasi {$location} sedang dalam proses Stock Opname fisik aktif. Penyesuaian stok ditolak hingga Opname selesai.",
+            ]);
+        }
 
         DB::transaction(function () use ($validated, $location, $batch) {
             $stock = InventoryStock::where('produk_id', $validated['produk_id'])
@@ -230,4 +237,4 @@ class InventoryController extends Controller
             return back()->with('error', 'Gagal snapshot Beginning Stock: '.$e->getMessage());
         }
     }
-};
+}

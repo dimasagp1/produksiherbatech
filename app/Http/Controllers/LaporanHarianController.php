@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\Odoo\PushBatchToOdooJob;
 use App\Models\AlasanDowntime;
 use App\Models\LaporanHarian;
 use App\Models\Line;
@@ -10,6 +11,7 @@ use App\Models\Mesin;
 use App\Models\Produk;
 use App\Models\WeeklyPlan;
 use App\Models\WorkCenter;
+use App\Services\Odoo\OdooOutbox;
 use App\Services\OeeCalculator;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -704,6 +706,16 @@ class LaporanHarianController extends Controller
             'produktivitas_persen' => $produktivitas,
             'status' => 'submitted',
         ]);
+
+        // Enqueue dan dispatch job write-back ke Odoo MO asinkron
+        $syncJob = OdooOutbox::enqueue('laporan_harian', $laporanHarian->id, 'batch_finish', [
+            'odoo_mo_id' => $laporanHarian->weeklyPlan?->odoo_mo_id,
+            'batch_number' => $laporanHarian->batch_number,
+            'output_fisik' => $outputFisik,
+            'proses' => $laporanHarian->proses,
+        ], 'mrp.production');
+
+        PushBatchToOdooJob::dispatch($syncJob->id)->afterCommit();
 
         return redirect()->route('leader.laporan-harian.show', $laporanHarian->id)
             ->with('success', 'Laporan harian berhasil dikirim');
