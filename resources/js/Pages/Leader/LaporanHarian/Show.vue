@@ -5,7 +5,7 @@ import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { formatDate } from '@/utils/date';
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 
 interface Mesin {
@@ -116,6 +116,20 @@ const outputFisik = ref<string>(String(props.laporan.output_fisik ?? ''));
 
 // Quality input for post-sync override
 const qualityInput = ref<string>('');
+
+const page = usePage() as any;
+const canOverrideQuality = computed(() => {
+    const allowed = ['spv', 'manager', 'superadmin', 'admin'];
+    const userRole = page.props.auth?.user?.role;
+    const userRoles = page.props.auth?.user?.roles || [];
+    if (userRole && allowed.includes(userRole)) return true;
+    if (Array.isArray(userRoles)) {
+        return allowed.some((r) =>
+            userRoles.some((ur: any) => (typeof ur === 'string' ? ur === r : ur?.name === r)),
+        );
+    }
+    return false;
+});
 
 // Timer display for current
 const timerDisplay = computed(() => {
@@ -1933,8 +1947,9 @@ function laporanTimerLabel(l: Laporan) {
                         <!-- Quality % Input (Post-Sync) - only for SPV/Manager/Admin -->
                         <div
                             v-if="
-                                laporan.status === 'submitted' ||
-                                laporan.status === 'locked'
+                                canOverrideQuality &&
+                                (laporan.status === 'submitted' ||
+                                laporan.status === 'locked')
                             "
                             class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700"
                         >
