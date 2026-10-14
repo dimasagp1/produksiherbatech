@@ -86,7 +86,7 @@ const form = useForm({
     mp_count: props.item?.mp_count ?? 0,
     target_qty: props.item?.target_qty ?? 0,
     cleaning: props.item?.cleaning ?? false,
-    adjusted_qty: props.item?.adjusted_qty ?? 0,
+    adjusted_qty: (props.item?.adjusted_qty !== null && props.item?.adjusted_qty !== undefined) ? props.item.adjusted_qty : ('' as string | number),
     gap_reason: props.item?.gap_reason ?? null,
     notes: props.item?.notes ?? '',
 });
@@ -105,25 +105,26 @@ const selectedWorkCenter = computed(() => {
     return props.workCenters.find(wc => wc.id === Number(form.work_center_id)) ?? null;
 }) as ComputedRef<WorkCenter | null>;
 
-const selectedWorkCenterNonNull = computed(() => {
-    const wc = selectedWorkCenter.value;
-    if (!wc) throw new Error('WorkCenter not found');
-    return wc;
-});
-
 const targetPreview = computed(() => {
-    if (!selectedWorkCenter.value || form.mp_count <= 0) return 0;
+    if (!selectedWorkCenter.value || Number(form.mp_count) <= 0) return 0;
     
     const wc = selectedWorkCenter.value;
-    if (!wc) return 0;
+    if (!wc || wc.standard_ct_seconds <= 0) return 0;
     
     const isSaturday = new Date(`${props.monthYear}-${String(props.day).padStart(2, '0')}`).getDay() === 6;
-    const hours = isSaturday ? wc.saturday_shift_hours : wc.shift_hours;
+    const hours = isSaturday ? (wc.saturday_shift_hours || wc.shift_hours) : wc.shift_hours;
     
-    if (wc.standard_ct_seconds <= 0) return 0;
     const outputPerMinute = 60 / wc.standard_ct_seconds;
+    const fitMp = wc.fit_mp > 0 ? wc.fit_mp : 1;
+    const targetPerPerson = (outputPerMinute * hours * 60) / fitMp;
     
-    return Math.round(outputPerMinute * hours * 60 * form.mp_count);
+    return Math.floor(targetPerPerson * Number(form.mp_count));
+});
+
+watch([() => form.mp_count, () => form.work_center_id], () => {
+    if (!form.cleaning) {
+        form.target_qty = targetPreview.value;
+    }
 });
 
 const shiftLabel: Record<string, string> = {
@@ -151,16 +152,21 @@ const typeLabel: Record<string, string> = {
 };
 
 function submit() {
+    const rawAdj = form.adjusted_qty;
+    const sanitizedAdj = (rawAdj !== '' && rawAdj !== null && rawAdj !== undefined && !isNaN(Number(rawAdj)))
+        ? Number(rawAdj)
+        : null;
+
     const data = {
         line_id: Number(form.line_id),
         work_center_id: form.work_center_id ? Number(form.work_center_id) : null,
         shift: form.shift,
-        mp_count: form.mp_count,
-        target_qty: form.target_qty,
-        cleaning: form.cleaning,
-        adjusted_qty: form.adjusted_qty,
-        gap_reason: form.gap_reason,
-        notes: form.notes,
+        mp_count: Number(form.mp_count) || 0,
+        target_qty: Number(form.target_qty) || 0,
+        cleaning: Boolean(form.cleaning),
+        adjusted_qty: sanitizedAdj,
+        gap_reason: sanitizedAdj !== null ? (form.gap_reason || null) : null,
+        notes: form.notes || '',
     };
     
     // Always emit update-item with a valid item (either existing or new with id: 0)
@@ -170,12 +176,12 @@ function submit() {
         line_id: Number(form.line_id),
         work_center_id: form.work_center_id ? Number(form.work_center_id) : null,
         shift: form.shift,
-        mp_count: form.mp_count,
-        target_qty: form.target_qty,
-        cleaning: form.cleaning,
-        adjusted_qty: form.adjusted_qty ?? null,
-        gap_reason: form.gap_reason ?? null,
-        notes: form.notes ?? '',
+        mp_count: Number(form.mp_count) || 0,
+        target_qty: Number(form.target_qty) || 0,
+        cleaning: Boolean(form.cleaning),
+        adjusted_qty: sanitizedAdj,
+        gap_reason: sanitizedAdj !== null ? (form.gap_reason || null) : null,
+        notes: form.notes || '',
     } as MpsItem;
     
     emit('update-item', item, data);
@@ -189,7 +195,7 @@ function closeModal() {
 function getHours(): number {
     if (!selectedWorkCenter.value) return 0;
     const isSaturday = new Date(`${props.monthYear}-${String(props.day).padStart(2, '0')}`).getDay() === 6;
-    return isSaturday ? selectedWorkCenter.value.saturday_shift_hours : selectedWorkCenter.value.shift_hours;
+    return isSaturday ? (selectedWorkCenter.value.saturday_shift_hours || selectedWorkCenter.value.shift_hours) : selectedWorkCenter.value.shift_hours;
 }
 </script>
 
@@ -309,14 +315,15 @@ function getHours(): number {
                     </label>
                 </div>
 
-                <div v-if="!isNew">
+                <div>
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <InputLabel value="Adjusted Qty" />
+                            <InputLabel value="Adjusted Qty (Opsional)" />
                             <TextInput
                                 v-model="form.adjusted_qty"
                                 type="number"
                                 min="0"
+                                placeholder="Kosongkan jika sesuai target"
                                 class="mt-1.5 block w-full text-xs"
                             />
                         </div>
@@ -327,7 +334,7 @@ function getHours(): number {
                                 v-model="form.gap_reason"
                                 class="mt-1.5 block w-full rounded-xl border-slate-300 text-xs text-slate-900 shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                             >
-                                <option value="">— Pilih Alasan Gap —</option>
+                                <option :value="null">— Pilih Alasan Gap (jika di-adjust) —</option>
                                 <option v-for="opt in gapReasonOptions" :key="opt.value" :value="opt.value">
                                     {{ opt.label }}
                                 </option>
@@ -335,14 +342,14 @@ function getHours(): number {
                         </div>
                     </div>
 
-<div class="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400" v-if="selectedWorkCenterNonNull">
-                        <span :class="typeIcon[selectedWorkCenterNonNull.type] + ' text-lg'"></span>
-                        <span>{{ typeLabel[selectedWorkCenterNonNull.type] ?? '—' }}</span>
+                    <div class="mt-3 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400" v-if="selectedWorkCenter">
+                        <span :class="typeIcon[selectedWorkCenter.type] + ' text-lg'"></span>
+                        <span>{{ typeLabel[selectedWorkCenter.type] ?? '—' }}</span>
                         <span class="ml-2 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
-                            CT: {{ selectedWorkCenterNonNull.standard_ct_seconds }}s
+                            CT: {{ selectedWorkCenter.standard_ct_seconds }}s
                         </span>
                         <span class="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
-                            MP Standar: {{ selectedWorkCenterNonNull.fit_mp }}
+                            MP Standar: {{ selectedWorkCenter.fit_mp }}
                         </span>
                     </div>
                 </div>

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 
 class MpsPlan extends Model
 {
@@ -18,6 +19,9 @@ class MpsPlan extends Model
         'produk_id',
         'work_center_id',
         'month_year',
+        'revision',
+        'is_active_revision',
+        'parent_plan_id',
         'status',
         'notes',
         'beginning_stock_snapshot',
@@ -28,6 +32,9 @@ class MpsPlan extends Model
 
     protected $casts = [
         'status' => 'string',
+        'revision' => 'integer',
+        'is_active_revision' => 'boolean',
+        'parent_plan_id' => 'integer',
         'beginning_stock_snapshot' => 'decimal:3',
         'beginning_stock_date' => 'date',
         'closed_at' => 'datetime',
@@ -41,6 +48,16 @@ class MpsPlan extends Model
     public function workCenter(): BelongsTo
     {
         return $this->belongsTo(WorkCenter::class);
+    }
+
+    public function parentPlan(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_plan_id');
+    }
+
+    public function revisions(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_plan_id')->orderBy('revision', 'asc');
     }
 
     public function items(): HasMany
@@ -66,6 +83,61 @@ class MpsPlan extends Model
     public function scopeActive($query)
     {
         return $query->where('status', 'active');
+    }
+
+    public function scopeActiveRevision($query)
+    {
+        return $query->where('is_active_revision', true);
+    }
+
+    /**
+     * Create a new draft revision from this approved plan
+     */
+    public function createNextRevision(?int $userId = null): self
+    {
+        return DB::transaction(function () use ($userId) {
+            $rootPlanId = $this->parent_plan_id ?: $this->id;
+
+            $maxRev = (int) self::where(function ($q) use ($rootPlanId) {
+                $q->where('id', $rootPlanId)
+                    ->orWhere('parent_plan_id', $rootPlanId);
+            })->max('revision');
+
+            $newRevisionNumber = $maxRev + 1;
+
+            $newPlan = self::create([
+                'produk_id' => $this->produk_id,
+                'work_center_id' => $this->work_center_id,
+                'month_year' => $this->month_year,
+                'revision' => $newRevisionNumber,
+                'is_active_revision' => false,
+                'parent_plan_id' => $rootPlanId,
+                'status' => 'draft',
+                'notes' => 'Revisi '.$newRevisionNumber.' dari Plan #'.$this->id,
+                'created_by' => $userId ?? auth()->id() ?? $this->created_by,
+                'beginning_stock_snapshot' => $this->beginning_stock_snapshot,
+                'beginning_stock_date' => $this->beginning_stock_date,
+            ]);
+
+            foreach ($this->items as $item) {
+                $newItemData = $item->only([
+                    'tanggal',
+                    'line_id',
+                    'work_center_id',
+                    'shift',
+                    'mp_count',
+                    'target_qty',
+                    'cleaning',
+                    'adjusted_qty',
+                    'gap_reason',
+                    'notes',
+                ]);
+                $newItemData['mps_plan_id'] = $newPlan->id;
+                MpsItem::create($newItemData);
+            }
+
+            return $newPlan;
+        });
     }
 
     public function getBeginningStockOhAttribute(): float

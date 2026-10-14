@@ -32,6 +32,8 @@ interface MpsPlan {
     produk_id: number;
     work_center_id: number;
     month_year: string;
+    revision: number;
+    is_active_revision: boolean;
     status: string;
     notes: string | null;
     created_by: number;
@@ -225,7 +227,12 @@ function getStatusLabel(status: string): string {
                                 class="hover:bg-gray-50/70 dark:hover:bg-gray-700/40"
                             >
                                 <td class="px-4 py-3 font-mono text-xs font-semibold text-gray-900 dark:text-gray-100">
-                                    {{ formatMonthYear(plan.month_year) }}
+                                    <div class="flex items-center gap-1.5">
+                                        <span>{{ formatMonthYear(plan.month_year) }}</span>
+                                        <span class="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                                            R{{ plan.revision ?? 1 }}
+                                        </span>
+                                    </div>
                                 </td>
                                 <td class="px-4 py-3">
                                     <div class="flex flex-col">

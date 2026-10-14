@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\Auditable;
+use App\Services\TargetCalculationService;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -97,17 +98,14 @@ class MpsItem extends Model
             return $this->target_qty;
         }
 
-        $wc = $this->workCenter ?? $this->plan->workCenter;
+        $wc = $this->workCenter ?? $this->plan?->workCenter;
         if (! $wc || $wc->standard_ct_seconds <= 0 || $this->mp_count <= 0) {
             return 0;
         }
 
         $hours = $this->isSaturday() ? ($wc->saturday_shift_hours ?: $wc->shift_hours) : $wc->shift_hours;
-        $outputPerMinute = 60 / $wc->standard_ct_seconds;
-        $fitMp = $wc->fit_mp > 0 ? $wc->fit_mp : 1;
-        $targetPerPerson = ($outputPerMinute * $hours * 60) / $fitMp;
 
-        return (int) round($targetPerPerson * $this->mp_count);
+        return TargetCalculationService::calculateTarget($wc, $this->mp_count, $hours);
     }
 
     /**

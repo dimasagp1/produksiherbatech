@@ -4,6 +4,9 @@ namespace App\Http\Controllers\PPIC;
 
 use App\Exports\MpsPlanExport;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\PPIC\StoreMpsItemRequest;
+use App\Http\Requests\PPIC\StoreMpsPlanRequest;
+use App\Http\Requests\PPIC\UpdateMpsItemRequest;
 use App\Models\Line;
 use App\Models\MpsItem;
 use App\Models\MpsPlan;
@@ -11,6 +14,8 @@ use App\Models\Produk;
 use App\Models\WorkCenter;
 use App\Services\MpsWeeklyPlanGenerator;
 use App\Services\MrpCalculationService;
+use App\Services\TargetCalculationService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Maatwebsite\Excel\Facades\Excel;
@@ -26,6 +31,7 @@ class MpsController extends Controller
             ->when($monthYear, fn ($q, $m) => $q->where('month_year', $m))
             ->when($status !== 'all', fn ($q, $s) => $q->where('status', $s))
             ->latest('month_year')
+            ->orderBy('revision', 'desc')
             ->paginate(15)
             ->withQueryString();
 
@@ -65,15 +71,10 @@ class MpsController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store(StoreMpsPlanRequest $request)
     {
         $this->checkReadOnly();
-        $validated = $request->validate([
-            'produk_id' => 'required|exists:produks,id',
-            'work_center_id' => 'required|exists:work_centers,id',
-            'month_year' => 'required|date_format:Y-m',
-            'notes' => 'nullable|string',
-        ]);
+        $validated = $request->validated();
 
         // Check if plan already exists for this product + WC + month
         $exists = MpsPlan::where('produk_id', $validated['produk_id'])
@@ -83,7 +84,7 @@ class MpsController extends Controller
 
         if ($exists) {
             return back()->withErrors([
-                'month_year' => 'MPS Plan untuk produk dan Work Center ini pada bulan tersebut sudah ada.',
+                'month_year' => 'MPS Plan untuk produk dan Work Center ini pada bulan tersebut sudah ada. Buka plan tersebut untuk melihat atau membuat revisi.',
             ]);
         }
 
@@ -91,6 +92,8 @@ class MpsController extends Controller
             'produk_id' => $validated['produk_id'],
             'work_center_id' => $validated['work_center_id'],
             'month_year' => $validated['month_year'],
+            'revision' => 1,
+            'is_active_revision' => true,
             'status' => 'draft',
             'notes' => $validated['notes'] ?? null,
             'created_by' => auth()->id(),
@@ -103,7 +106,13 @@ class MpsController extends Controller
 
     public function show(MpsPlan $mps)
     {
-        $mps->load(['produk', 'workCenter', 'creator', 'items.line', 'items.workCenter']);
+        $mps->load(['produk', 'workCenter', 'creator', 'items.line', 'items.workCenter', 'parentPlan', 'revisions']);
+
+        $rootPlanId = $mps->parent_plan_id ?: $mps->id;
+        $allRevisions = MpsPlan::where('id', $rootPlanId)
+            ->orWhere('parent_plan_id', $rootPlanId)
+            ->orderBy('revision', 'asc')
+            ->get(['id', 'revision', 'status', 'is_active_revision', 'created_at']);
 
         $lines = Line::aktif()->with('defaultWorkCenter')->get();
         $workCenters = WorkCenter::active()->get();
@@ -111,6 +120,7 @@ class MpsController extends Controller
 
         return Inertia::render('PPIC/Mps/Show', [
             'plan' => $mps,
+            'revisions' => $allRevisions,
             'lines' => $lines,
             'workCenters' => $workCenters,
             'daysInMonth' => $daysInMonth,
@@ -144,28 +154,19 @@ class MpsController extends Controller
         ]);
     }
 
-    public function storeItem(Request $request, MpsPlan $mps)
+    public function storeItem(StoreMpsItemRequest $request, MpsPlan $mps)
     {
         $this->checkReadOnly();
         if ($mps->status !== 'draft') {
             if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
-                return response()->json(['message' => 'Hanya plan draft yang bisa diedit'], 422);
+                return response()->json(['message' => 'Hanya plan draft yang bisa diedit. Untuk plan approved, silakan buat revisi baru.'], 422);
             }
 
-            return back()->withErrors(['error' => 'Hanya plan draft yang bisa diedit']);
+            return back()->withErrors(['error' => 'Hanya plan draft yang bisa diedit. Untuk plan approved, silakan buat revisi baru.']);
         }
-        $validated = $request->validate([
-            'tanggal' => 'required|date',
-            'line_id' => 'nullable|exists:lines,id',
-            'work_center_id' => 'nullable|exists:work_centers,id',
-            'shift' => 'required|in:shift1,shift2',
-            'mp_count' => 'nullable|integer|min:0',
-            'target_qty' => 'nullable|integer|min:0',
-            'cleaning' => 'boolean',
-            'adjusted_qty' => 'nullable|integer|min:0',
-            'gap_reason' => 'nullable|in:cleaning,capacity_limit,material_shortage,manual',
-            'notes' => 'nullable|string',
-        ]);
+
+        $validated = $request->validated();
+
         if (! empty($validated['cleaning']) && $validated['cleaning']) {
             $validated['mp_count'] = 0;
             $validated['target_qty'] = 0;
@@ -174,6 +175,8 @@ class MpsController extends Controller
                 $validated['gap_reason'] = 'cleaning';
             }
         }
+
+        // Validate line can run the selected work center
         if (! empty($validated['line_id']) && ! empty($validated['work_center_id'])) {
             $line = Line::find($validated['line_id']);
             $wc = WorkCenter::find($validated['work_center_id']);
@@ -186,7 +189,32 @@ class MpsController extends Controller
                 return back()->withErrors(['work_center_id' => $msg]);
             }
         }
-        $exists = MpsItem::where('mps_plan_id', $mps->id)->where('tanggal', $validated['tanggal'])->where('line_id', $validated['line_id'])->where('shift', $validated['shift'])->exists();
+
+        // Validate technical capacity limit (DEV-208)
+        $targetWc = (! empty($validated['work_center_id']) ? WorkCenter::find($validated['work_center_id']) : null) ?? $mps->workCenter;
+        if ($targetWc && $targetWc->standard_ct_seconds > 0) {
+            $isSaturday = Carbon::parse($validated['tanggal'])->isSaturday();
+            $customHours = $isSaturday ? ($targetWc->saturday_shift_hours ?: $targetWc->shift_hours) : $targetWc->shift_hours;
+            $maxCapacity = TargetCalculationService::getMaxLineCapacity($targetWc, $customHours);
+
+            if (! empty($validated['adjusted_qty']) && $validated['adjusted_qty'] > ($maxCapacity * 1.5)) {
+                $maxFormatted = number_format($maxCapacity, 0, ',', '.');
+                $adjFormatted = number_format($validated['adjusted_qty'], 0, ',', '.');
+                $msg = "Target penyesuaian ({$adjFormatted} pcs) melebihi batas kapasitas teknis mesin/lini ({$maxFormatted} pcs/shift).";
+                if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                    return response()->json(['message' => $msg, 'errors' => ['adjusted_qty' => [$msg]]], 422);
+                }
+
+                return back()->withErrors(['adjusted_qty' => $msg]);
+            }
+        }
+
+        $exists = MpsItem::where('mps_plan_id', $mps->id)
+            ->where('tanggal', $validated['tanggal'])
+            ->where('line_id', $validated['line_id'])
+            ->where('shift', $validated['shift'])
+            ->exists();
+
         if ($exists) {
             $msg = 'Item untuk tanggal, line, dan shift tersebut sudah ada.';
             if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
@@ -195,15 +223,28 @@ class MpsController extends Controller
 
             return back()->withErrors(['tanggal' => $msg]);
         }
+
         $item = MpsItem::create(array_merge($validated, ['mps_plan_id' => $mps->id]));
         if (empty($validated['cleaning'])) {
             $item->recalculateTarget();
         }
+
         if (! empty($validated['cleaning']) && $validated['cleaning']) {
-            MpsItem::where('mps_plan_id', $mps->id)->where('tanggal', $validated['tanggal'])->where('line_id', $validated['line_id'])->where('shift', $validated['shift'] === 'shift1' ? 'shift2' : 'shift1')->where('id', '!=', $item->id)->delete();
-            MpsItem::updateOrCreate(['mps_plan_id' => $mps->id, 'tanggal' => $validated['tanggal'], 'line_id' => $validated['line_id'], 'shift' => $validated['shift'] === 'shift1' ? 'shift2' : 'shift1'], ['work_center_id' => $validated['work_center_id'] ?? null, 'mp_count' => 0, 'target_qty' => 0, 'cleaning' => true, 'adjusted_qty' => null, 'gap_reason' => 'cleaning', 'notes' => 'Auto cleaning full-day']);
+            MpsItem::where('mps_plan_id', $mps->id)
+                ->where('tanggal', $validated['tanggal'])
+                ->where('line_id', $validated['line_id'])
+                ->where('shift', $validated['shift'] === 'shift1' ? 'shift2' : 'shift1')
+                ->where('id', '!=', $item->id)
+                ->delete();
+
+            MpsItem::updateOrCreate(
+                ['mps_plan_id' => $mps->id, 'tanggal' => $validated['tanggal'], 'line_id' => $validated['line_id'], 'shift' => $validated['shift'] === 'shift1' ? 'shift2' : 'shift1'],
+                ['work_center_id' => $validated['work_center_id'] ?? null, 'mp_count' => 0, 'target_qty' => 0, 'cleaning' => true, 'adjusted_qty' => null, 'gap_reason' => 'cleaning', 'notes' => 'Auto cleaning full-day']
+            );
         }
+
         app(MrpCalculationService::class)->calculate($mps);
+
         if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
             return response()->json(['success' => true, 'item' => $item->fresh(['line', 'workCenter'])]);
         }
@@ -211,50 +252,18 @@ class MpsController extends Controller
         return back()->with('success', 'MPS item disimpan.');
     }
 
-    public function close(MpsPlan $mps)
-    {
-        $this->checkReadOnly();
-        if (! in_array($mps->status, ['active', 'approved'])) {
-            return back()->withErrors(['error' => 'Hanya plan active/approved yang bisa di-close']);
-        }
-        $mps->update(['status' => 'closed', 'closed_at' => now()]);
-
-        return back()->with('success', 'MPS Plan di-close.');
-    }
-
-    public function resnapshot(MpsPlan $mps)
-    {
-        $this->checkReadOnly();
-        if ($mps->status !== 'draft') {
-            return back()->withErrors(['error' => 'Snapshot hanya untuk draft']);
-        }
-        $val = $mps->snapshotBeginningStock();
-
-        return back()->with('success', 'Snapshot Stock OH diperbarui: '.number_format($val, 0, ',', '.'));
-    }
-
-    public function updateItem(Request $request, MpsItem $item)
+    public function updateItem(UpdateMpsItemRequest $request, MpsItem $item)
     {
         $this->checkReadOnly();
         if ($item->plan && $item->plan->status !== 'draft') {
             if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
-                return response()->json(['message' => 'Hanya plan draft yang bisa diedit'], 422);
+                return response()->json(['message' => 'Hanya plan draft yang bisa diedit. Untuk plan approved, silakan buat revisi baru.'], 422);
             }
 
-            return back()->withErrors(['error' => 'Hanya plan draft yang bisa diedit']);
+            return back()->withErrors(['error' => 'Hanya plan draft yang bisa diedit. Untuk plan approved, silakan buat revisi baru.']);
         }
 
-        $validated = $request->validate([
-            'line_id' => 'nullable|exists:lines,id',
-            'work_center_id' => 'nullable|exists:work_centers,id',
-            'shift' => 'required|in:shift1,shift2',
-            'mp_count' => 'nullable|integer|min:0',
-            'target_qty' => 'nullable|integer|min:0',
-            'cleaning' => 'boolean',
-            'adjusted_qty' => 'nullable|integer|min:0',
-            'gap_reason' => 'nullable|in:cleaning,capacity_limit,material_shortage,manual',
-            'notes' => 'nullable|string',
-        ]);
+        $validated = $request->validated();
 
         if (! empty($validated['cleaning']) && $validated['cleaning']) {
             $validated['mp_count'] = 0;
@@ -266,21 +275,41 @@ class MpsController extends Controller
         }
 
         // Validate line can run the selected work center
-        if ($validated['line_id'] && $validated['work_center_id']) {
+        if (! empty($validated['line_id']) && ! empty($validated['work_center_id'])) {
             $line = Line::find($validated['line_id']);
             $wc = WorkCenter::find($validated['work_center_id']);
 
             if ($line && $wc && ! $line->canRunWorkCenter($wc->type)) {
+                $msg = "Line {$line->nama_line} tidak bisa menjalankan {$wc->name} ({$wc->type})";
                 if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                     return response()->json([
-                        'message' => "Line {$line->nama_line} tidak bisa menjalankan {$wc->name} ({$wc->type})",
-                        'errors' => ['work_center_id' => ["Line {$line->nama_line} tidak bisa menjalankan {$wc->name} ({$wc->type})"]],
+                        'message' => $msg,
+                        'errors' => ['work_center_id' => [$msg]],
                     ], 422);
                 }
 
                 return back()->withErrors([
-                    'work_center_id' => "Line {$line->nama_line} tidak bisa menjalankan {$wc->name} ({$wc->type})",
+                    'work_center_id' => $msg,
                 ]);
+            }
+        }
+
+        // Validate technical capacity limit (DEV-208)
+        $targetWc = (! empty($validated['work_center_id']) ? WorkCenter::find($validated['work_center_id']) : null) ?? $item->workCenter ?? $item->plan?->workCenter;
+        if ($targetWc && $targetWc->standard_ct_seconds > 0) {
+            $isSaturday = Carbon::parse($item->tanggal)->isSaturday();
+            $customHours = $isSaturday ? ($targetWc->saturday_shift_hours ?: $targetWc->shift_hours) : $targetWc->shift_hours;
+            $maxCapacity = TargetCalculationService::getMaxLineCapacity($targetWc, $customHours);
+
+            if (! empty($validated['adjusted_qty']) && $validated['adjusted_qty'] > ($maxCapacity * 1.5)) {
+                $maxFormatted = number_format($maxCapacity, 0, ',', '.');
+                $adjFormatted = number_format($validated['adjusted_qty'], 0, ',', '.');
+                $msg = "Target penyesuaian ({$adjFormatted} pcs) melebihi batas kapasitas teknis mesin/lini ({$maxFormatted} pcs/shift).";
+                if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                    return response()->json(['message' => $msg, 'errors' => ['adjusted_qty' => [$msg]]], 422);
+                }
+
+                return back()->withErrors(['adjusted_qty' => $msg]);
             }
         }
 
@@ -293,10 +322,9 @@ class MpsController extends Controller
             MpsItem::updateOrCreate(['mps_plan_id' => $item->mps_plan_id, 'tanggal' => $item->tanggal, 'line_id' => $item->line_id, 'shift' => $other], ['work_center_id' => $validated['work_center_id'] ?? $item->work_center_id, 'mp_count' => 0, 'target_qty' => 0, 'cleaning' => true, 'adjusted_qty' => null, 'gap_reason' => 'cleaning', 'notes' => 'Auto cleaning full-day']);
         } elseif (isset($validated['mp_count']) || isset($validated['work_center_id'])) {
             $item->refresh();
-            \Log::info('Recalculating target for item', ['item_id' => $item->id, 'mp_count' => $item->mp_count]);
             $item->recalculateTarget();
-            \Log::info('Recalculated target', ['new_target' => $item->target_qty]);
         }
+
         $mrpPlan = $item->plan ?? MpsPlan::find($item->mps_plan_id);
         if ($mrpPlan) {
             app(MrpCalculationService::class)->calculate($mrpPlan);
@@ -332,9 +360,29 @@ class MpsController extends Controller
             return back()->withErrors(['error' => 'Grid masih kosong (total 0). Isi MPS terlebih dahulu sebelum approve.']);
         }
 
-        $mps->update(['status' => 'approved']);
+        // Set all other revisions of this plan group as inactive
+        $rootPlanId = $mps->parent_plan_id ?: $mps->id;
+        MpsPlan::where(function ($q) use ($rootPlanId) {
+            $q->where('id', $rootPlanId)->orWhere('parent_plan_id', $rootPlanId);
+        })->where('id', '!=', $mps->id)->update(['is_active_revision' => false]);
 
-        return redirect()->back()->with('success', 'MPS Plan di-approve. Siap untuk generate Weekly Plans.');
+        $mps->update(['status' => 'approved', 'is_active_revision' => true]);
+
+        return redirect()->back()->with('success', 'MPS Plan (Rev '.$mps->revision.') di-approve. Siap untuk generate Weekly Plans.');
+    }
+
+    public function createRevision(MpsPlan $mps)
+    {
+        $this->checkReadOnly();
+
+        if ($mps->status === 'draft') {
+            return back()->withErrors(['error' => 'Plan masih berstatus draft. Tidak perlu membuat revisi baru.']);
+        }
+
+        $newPlan = $mps->createNextRevision();
+
+        return redirect()->route('ppic.mps.show', $newPlan->id)
+            ->with('success', "Revisi {$newPlan->revision} berhasil dibuat sebagai draft. Silakan sesuaikan grid.");
     }
 
     public function activate(MpsPlan $mps)
@@ -369,11 +417,33 @@ class MpsController extends Controller
         return redirect()->back()->with('success', $message);
     }
 
+    public function close(MpsPlan $mps)
+    {
+        $this->checkReadOnly();
+        if (! in_array($mps->status, ['active', 'approved'])) {
+            return back()->withErrors(['error' => 'Hanya plan active/approved yang bisa di-close']);
+        }
+        $mps->update(['status' => 'closed', 'closed_at' => now()]);
+
+        return back()->with('success', 'MPS Plan di-close.');
+    }
+
+    public function resnapshot(MpsPlan $mps)
+    {
+        $this->checkReadOnly();
+        if ($mps->status !== 'draft') {
+            return back()->withErrors(['error' => 'Snapshot hanya untuk draft']);
+        }
+        $val = $mps->snapshotBeginningStock();
+
+        return back()->with('success', 'Snapshot Stock OH diperbarui: '.number_format($val, 0, ',', '.'));
+    }
+
     public function export(MpsPlan $mps)
     {
         $mps->load(['produk', 'workCenter']);
 
-        return Excel::download(new MpsPlanExport($mps), 'MPS-'.$mps->produk->kode_produk.'-'.$mps->month_year.'.xlsx');
+        return Excel::download(new MpsPlanExport($mps), 'MPS-'.$mps->produk->kode_produk.'-'.$mps->month_year.'-Rev'.$mps->revision.'.xlsx');
     }
 
     public function destroy(MpsPlan $mps)

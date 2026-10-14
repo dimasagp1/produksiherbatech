@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Models\WeeklyPlan;
 use App\Models\WorkCenter;
 use App\Services\MpsWeeklyPlanGenerator;
+use App\Services\TargetCalculationService;
 use Database\Seeders\RoleSeeder;
 use Database\Seeders\WorkCenterSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -646,5 +647,171 @@ class MpsTest extends TestCase
 
         $plan->refresh();
         $this->assertEquals(1000, $plan->beginning_stock_oh);
+    }
+
+    // ==================== WeeklyPlan Target Adjustment ====================
+
+    public function test_weekly_plan_generator_uses_adjusted_qty_when_present()
+    {
+        $plan = MpsPlan::factory()->create([
+            'produk_id' => $this->produk->id,
+            'work_center_id' => $this->wcMixing->id,
+            'month_year' => '2026-10',
+            'status' => 'approved',
+            'created_by' => $this->ppicUser->id,
+        ]);
+
+        $item = MpsItem::factory()->create([
+            'mps_plan_id' => $plan->id,
+            'tanggal' => '2026-10-01',
+            'line_id' => $this->lineA->id,
+            'work_center_id' => $this->wcMixing->id,
+            'shift' => 'shift1',
+            'mp_count' => 4,
+            'cleaning' => false,
+            'target_qty' => 7800,
+            'adjusted_qty' => 8500,
+        ]);
+
+        $plan->load('items.line', 'items.workCenter');
+        $result = app(MpsWeeklyPlanGenerator::class)->generate($plan);
+
+        $this->assertEquals(1, $result['created']);
+
+        $wp = WeeklyPlan::where('batch_number', 'like', 'MPS-%')->first();
+        $this->assertNotNull($wp);
+        $this->assertEquals(8500, $wp->target_output);
+    }
+
+    // ==================== Capacity Guard Validation ====================
+
+    public function test_mps_item_capacity_limit_validation()
+    {
+        $plan = MpsPlan::factory()->create([
+            'produk_id' => $this->produk->id,
+            'work_center_id' => $this->wcMixing->id,
+            'month_year' => '2026-10',
+            'status' => 'draft',
+            'created_by' => $this->ppicUser->id,
+        ]);
+
+        $item = MpsItem::factory()->create([
+            'mps_plan_id' => $plan->id,
+            'tanggal' => '2026-10-01',
+            'line_id' => $this->lineA->id,
+            'work_center_id' => $this->wcMixing->id,
+            'shift' => 'shift1',
+            'mp_count' => 4,
+            'target_qty' => 7800,
+        ]);
+
+        $response = $this->actingAs($this->ppicUser)
+            ->post(route('ppic.mps.item.update', $item->id), [
+                'shift' => 'shift1',
+                'adjusted_qty' => 100000,
+                'gap_reason' => 'capacity_limit',
+            ]);
+
+        $response->assertSessionHasErrors('adjusted_qty');
+    }
+
+    // ==================== Revision Flow ====================
+
+    public function test_can_create_revision_from_approved_plan()
+    {
+        $plan = MpsPlan::factory()->create([
+            'produk_id' => $this->produk->id,
+            'work_center_id' => $this->wcMixing->id,
+            'month_year' => '2026-10',
+            'revision' => 1,
+            'is_active_revision' => true,
+            'status' => 'approved',
+            'created_by' => $this->ppicUser->id,
+        ]);
+
+        MpsItem::factory()->create([
+            'mps_plan_id' => $plan->id,
+            'tanggal' => '2026-10-01',
+            'line_id' => $this->lineA->id,
+            'work_center_id' => $this->wcMixing->id,
+            'shift' => 'shift1',
+            'mp_count' => 4,
+            'target_qty' => 7800,
+            'adjusted_qty' => 8000,
+        ]);
+
+        $response = $this->actingAs($this->ppicUser)
+            ->post(route('ppic.mps.revision', $plan->id));
+
+        $newPlan = MpsPlan::where('parent_plan_id', $plan->id)->first();
+        $this->assertNotNull($newPlan);
+        $this->assertEquals(2, $newPlan->revision);
+        $this->assertEquals('draft', $newPlan->status);
+        $this->assertFalse($newPlan->is_active_revision);
+        $this->assertEquals(1, $newPlan->items()->count());
+
+        $copiedItem = $newPlan->items()->first();
+        $this->assertEquals('2026-10-01', $copiedItem->tanggal);
+        $this->assertEquals(8000, $copiedItem->adjusted_qty);
+
+        $response->assertRedirect(route('ppic.mps.show', $newPlan->id));
+    }
+
+    public function test_approving_revision_marks_previous_revisions_inactive()
+    {
+        $planRev1 = MpsPlan::factory()->create([
+            'produk_id' => $this->produk->id,
+            'work_center_id' => $this->wcMixing->id,
+            'month_year' => '2026-10',
+            'revision' => 1,
+            'is_active_revision' => true,
+            'status' => 'approved',
+            'created_by' => $this->ppicUser->id,
+        ]);
+
+        $planRev2 = MpsPlan::factory()->create([
+            'produk_id' => $this->produk->id,
+            'work_center_id' => $this->wcMixing->id,
+            'month_year' => '2026-10',
+            'revision' => 2,
+            'is_active_revision' => false,
+            'parent_plan_id' => $planRev1->id,
+            'status' => 'draft',
+            'created_by' => $this->ppicUser->id,
+        ]);
+
+        MpsItem::factory()->create([
+            'mps_plan_id' => $planRev2->id,
+            'tanggal' => '2026-10-01',
+            'line_id' => $this->lineA->id,
+            'work_center_id' => $this->wcMixing->id,
+            'shift' => 'shift1',
+            'mp_count' => 4,
+            'target_qty' => 7800,
+        ]);
+
+        $this->actingAs($this->ppicUser)
+            ->post(route('ppic.mps.approve', $planRev2->id));
+
+        $planRev1->refresh();
+        $planRev2->refresh();
+
+        $this->assertFalse($planRev1->is_active_revision);
+        $this->assertTrue($planRev2->is_active_revision);
+        $this->assertEquals('approved', $planRev2->status);
+    }
+
+    // ==================== Target Calculation Service ====================
+
+    public function test_target_calculation_service_matches_formula()
+    {
+        $wc = $this->wcMixing;
+        $wc->update(['standard_ct_seconds' => 3, 'fit_mp' => 4]);
+
+        $target = TargetCalculationService::calculateTarget($wc, 4, 7);
+        $this->assertEquals(8400, $target);
+
+        $targetHalf = TargetCalculationService::calculateTarget($wc, 2, 7);
+        $this->assertEquals(4200, $targetHalf);
     }
 }

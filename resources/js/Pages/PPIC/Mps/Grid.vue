@@ -199,11 +199,28 @@ function colDayTotal(day: number): number {
     return s;
 }
 
+function colDayAdjTotal(day: number): number {
+    let s = 0;
+    for (const line of props.lines) for (const sh of ['shift1', 'shift2'] as const) {
+        const it = getItem(day, line, sh);
+        if (it && !it.cleaning) s += (it.adjusted_qty ?? it.target_qty);
+    }
+    return s;
+}
+
 function colWeekTotal(wIdx: number): number {
     const start = wIdx * 7 + 1;
     const end = wIdx === 4 ? props.daysInMonth : (wIdx + 1) * 7;
     let s = 0;
     for (let d = start; d <= end; d++) s += colDayTotal(d);
+    return s;
+}
+
+function colWeekAdjTotal(wIdx: number): number {
+    const start = wIdx * 7 + 1;
+    const end = wIdx === 4 ? props.daysInMonth : (wIdx + 1) * 7;
+    let s = 0;
+    for (let d = start; d <= end; d++) s += colDayAdjTotal(d);
     return s;
 }
 
@@ -256,11 +273,18 @@ const grandAdj = computed(() => props.lines.reduce((a, l) => a + rowAdjTotal(l, 
                         </tr>
                     </template>
                     <tr class="border-t-2 border-gray-300 bg-gray-100 dark:bg-gray-900 font-bold">
-                        <td class="w-24 px-2 py-1.5 sticky left-0 z-10 bg-gray-100 dark:bg-gray-900 text-center text-[10px]" colspan="1">TOTAL</td>
+                        <td class="w-24 px-2 py-1.5 sticky left-0 z-10 bg-gray-100 dark:bg-gray-900 text-center text-[10px]" colspan="1">PLAN</td>
                         <td v-for="day in days" :key="'tot'+day" class="px-1 py-1 text-center font-mono text-[11px]">{{ colDayTotal(day) ? colDayTotal(day).toLocaleString('id-ID') : '-' }}</td>
                         <td v-for="wIdx in 5" :key="'tw'+wIdx" class="px-1 py-1 text-center font-mono bg-gray-200 dark:bg-gray-800">{{ colWeekTotal(wIdx-1) ? colWeekTotal(wIdx-1).toLocaleString('id-ID') : '-' }}</td>
                         <td class="px-1 py-1 text-center font-mono bg-indigo-100 dark:bg-indigo-900/40">{{ grandPlan ? grandPlan.toLocaleString('id-ID') : '-' }}</td>
                         <td class="px-1 py-1 text-center font-mono bg-emerald-100 dark:bg-emerald-900/40">{{ grandAdj ? grandAdj.toLocaleString('id-ID') : '-' }}</td>
+                    </tr>
+                    <tr class="border-t border-gray-200 bg-emerald-50/60 dark:bg-emerald-950/20 font-bold text-emerald-900 dark:text-emerald-300">
+                        <td class="w-24 px-2 py-1.5 sticky left-0 z-10 bg-emerald-50 dark:bg-emerald-950/60 text-center text-[10px]" colspan="1">ADJ</td>
+                        <td v-for="day in days" :key="'totadj'+day" class="px-1 py-1 text-center font-mono text-[11px]">{{ colDayAdjTotal(day) ? colDayAdjTotal(day).toLocaleString('id-ID') : '-' }}</td>
+                        <td v-for="wIdx in 5" :key="'twadj'+wIdx" class="px-1 py-1 text-center font-mono bg-emerald-100/40 dark:bg-emerald-900/30">{{ colWeekAdjTotal(wIdx-1) ? colWeekAdjTotal(wIdx-1).toLocaleString('id-ID') : '-' }}</td>
+                        <td class="px-1 py-1 text-center font-mono bg-indigo-100/60 dark:bg-indigo-900/40">{{ grandPlan ? grandPlan.toLocaleString('id-ID') : '-' }}</td>
+                        <td class="px-1 py-1 text-center font-mono bg-emerald-200/60 dark:bg-emerald-900/60">{{ grandAdj ? grandAdj.toLocaleString('id-ID') : '-' }}</td>
                     </tr>
                 </tbody>
             </table>

@@ -122,6 +122,7 @@ Route::middleware(['auth', 'role:ppic|superadmin|manager'])->prefix('ppic')->nam
     Route::post('mps/{mps}/approve', [MpsController::class, 'approve'])->name('mps.approve');
     Route::post('mps/{mps}/activate', [MpsController::class, 'activate'])->name('mps.activate');
     Route::post('mps/{mps}/generate-weekly', [MpsController::class, 'generateWeeklyPlans'])->name('mps.generate-weekly');
+    Route::post('mps/{mps}/revision', [MpsController::class, 'createRevision'])->name('mps.revision');
     Route::post('mps/items/{item}', [MpsController::class, 'updateItem'])->name('mps.item.update');
 
     // Write operations - only ppic and superadmin
@@ -131,6 +132,7 @@ Route::middleware(['auth', 'role:ppic|superadmin|manager'])->prefix('ppic')->nam
         Route::post('mps/{mps}/approve', [MpsController::class, 'approve'])->name('mps.approve');
         Route::post('mps/{mps}/activate', [MpsController::class, 'activate'])->name('mps.activate');
         Route::post('mps/{mps}/generate-weekly', [MpsController::class, 'generateWeeklyPlans'])->name('mps.generate-weekly');
+        Route::post('mps/{mps}/revision', [MpsController::class, 'createRevision'])->name('mps.revision');
         Route::post('mps/{mps}/items', [MpsController::class, 'storeItem'])->name('mps.item.store');
         Route::post('mps/items/{item}', [MpsController::class, 'updateItem'])->name('mps.item.update');
         Route::delete('mps/{mps}', [MpsController::class, 'destroy'])->name('mps.destroy');

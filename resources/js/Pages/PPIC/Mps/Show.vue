@@ -54,11 +54,22 @@ interface MpsItem {
     workCenter: WorkCenter | null;
 }
 
+interface RevisionItem {
+    id: number;
+    revision: number;
+    status: string;
+    is_active_revision: boolean;
+    created_at: string;
+}
+
 interface MpsPlan {
     id: number;
     produk_id: number;
     work_center_id: number;
     month_year: string;
+    revision: number;
+    is_active_revision: boolean;
+    parent_plan_id: number | null;
     status: string;
     notes: string | null;
     created_by: number;
@@ -74,6 +85,7 @@ interface MpsPlan {
 
 const props = defineProps<{
     plan: MpsPlan;
+    revisions?: RevisionItem[];
     lines: Line[];
     workCenters: WorkCenter[];
     daysInMonth: number;
@@ -86,6 +98,7 @@ const flash = computed(() => (usePage().props as any).flash ?? {});
 
 const showGenerateConfirm = ref(false);
 const showApproveConfirm = ref(false);
+const showRevisionConfirm = ref(false);
 const gridError = ref<string | null>(null);
 const isDraft = computed(() => props.plan.status === 'draft');
 
@@ -150,6 +163,18 @@ const confirmApprove = () => {
     });
 }
 
+const handleRevision = () => {
+    showRevisionConfirm.value = true;
+}
+
+const confirmRevision = () => {
+    router.post(route('ppic.mps.revision', props.plan.id), {}, {
+        onSuccess: () => {
+            showRevisionConfirm.value = false;
+        },
+    });
+}
+
 const handleGenerate = () => {
     showGenerateConfirm.value = true;
 }
@@ -199,6 +224,30 @@ function getWcTypeIcon(type: string): string {
                         >
                             {{ getStatusLabel(props.plan.status) }}
                         </span>
+                        <span
+                            class="inline-flex items-center gap-1 rounded-md bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300"
+                        >
+                            Rev {{ props.plan.revision ?? 1 }}
+                            <span v-if="props.plan.is_active_revision" class="rounded bg-indigo-200/80 px-1 py-0.2 text-[8px] font-semibold uppercase text-indigo-900 dark:bg-indigo-800 dark:text-indigo-200">Aktif</span>
+                        </span>
+                        </div>
+                        <div v-if="props.revisions && props.revisions.length > 1" class="mt-1 flex flex-wrap items-center gap-1.5">
+                            <span class="text-[11px] font-medium text-gray-500 dark:text-gray-400">Versi:</span>
+                            <div class="inline-flex flex-wrap gap-1">
+                                <button
+                                    v-for="rev in props.revisions"
+                                    :key="rev.id"
+                                    type="button"
+                                    @click="router.visit(route('ppic.mps.show', rev.id))"
+                                    :class="rev.id === props.plan.id
+                                        ? 'bg-indigo-600 text-white font-bold shadow-sm'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'"
+                                    class="rounded px-2 py-0.5 text-[10px] transition"
+                                >
+                                    R{{ rev.revision }} ({{ getStatusLabel(rev.status) }})
+                                    <span v-if="rev.is_active_revision" class="ml-0.5 text-[9px] text-amber-300">★</span>
+                                </button>
+                            </div>
                         </div>
                          <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                             MPS Plan: {{ formatMonthYear(props.plan.month_year) }} · {{ props.plan.workCenter?.name }} · Stock OH: {{ props.beginningStockOH.toLocaleString('id-ID') }} <span v-if="props.plan.beginning_stock_snapshot!==null" class="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] dark:bg-gray-700">snapshot {{ props.plan.beginning_stock_date ? String(props.plan.beginning_stock_date).slice(0,10) : '' }}: {{ Number(props.plan.beginning_stock_snapshot).toLocaleString('id-ID') }}</span>
@@ -217,6 +266,14 @@ function getWcTypeIcon(type: string): string {
                         @click="handleApprove"
                     >
                         {{ props.plan.status === 'draft' ? 'Approve' : 'Activate' }}
+                    </button>
+                    <button
+                        v-if="props.plan.status === 'approved' || props.plan.status === 'active'"
+                        type="button"
+                        class="rounded-xl border border-indigo-300 bg-indigo-50 px-3.5 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300"
+                        @click="handleRevision"
+                    >
+                        Buat Revisi (Rev {{ (props.plan.revision ?? 1) + 1 }})
                     </button>
                     <PrimaryButton
                         v-if="props.plan.status === 'approved' || props.plan.status === 'active'"
@@ -298,6 +355,25 @@ function getWcTypeIcon(type: string): string {
                 <SecondaryButton @click="showApproveConfirm = false">Batal</SecondaryButton>
                 <PrimaryButton @click="confirmApprove">
                     {{ props.plan.status === 'draft' ? 'Approve' : 'Activate' }}
+                </PrimaryButton>
+            </template>
+        </Modal>
+
+        <!-- Revision Confirm Modal -->
+        <Modal :show="showRevisionConfirm" @close="showRevisionConfirm = false">
+            <template #title>Buat Revisi MPS Plan</template>
+            <template #content>
+                <p class="text-sm text-gray-600 dark:text-gray-300">
+                    Buat revisi baru <strong>(Rev {{ (props.plan.revision ?? 1) + 1 }})</strong> dari MPS Plan ini?
+                </p>
+                <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    Semua item jadwal harian dari plan ini akan disalin ke revisi baru berstatus <strong>Draft</strong> sehingga Anda dapat melakukan penyesuaian tanpa mengubah riwayat plan yang sudah disetujui.
+                </p>
+            </template>
+            <template #footer>
+                <SecondaryButton @click="showRevisionConfirm = false">Batal</SecondaryButton>
+                <PrimaryButton class="bg-indigo-600 hover:bg-indigo-700" @click="confirmRevision">
+                    Buat Revisi
                 </PrimaryButton>
             </template>
         </Modal>

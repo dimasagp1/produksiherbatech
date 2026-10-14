@@ -73,7 +73,7 @@ class MpsWeeklyPlanGenerator
                     'batch_number' => $batchNumber,
                     'odoo_mo_id' => null,
                     'mo_status' => WeeklyPlan::MO_STATUS_PENDING,
-                    'target_output' => $item->target_qty,
+                    'target_output' => $item->adjusted_qty ?? $item->target_qty,
                     'mp_count' => $item->mp_count,
                     'multiplier' => $wc->fit_mp ?? 1,
                     'packing_hold' => false,
