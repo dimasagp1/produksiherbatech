@@ -75,13 +75,20 @@ const props = defineProps<{
     lines: Line[];
     workCenters: WorkCenter[];
     monthYear: string;
+    defaultWorkCenterId?: number | null;
 }>();
 
 const emit = defineEmits(['update-item', 'close']);
 
+const initialWcId = (props.item?.work_center_id !== undefined && props.item?.work_center_id !== null && props.item?.work_center_id !== 0)
+    ? String(props.item.work_center_id)
+    : (props.defaultWorkCenterId
+        ? String(props.defaultWorkCenterId)
+        : (props.line.default_work_center_id ? String(props.line.default_work_center_id) : ''));
+
 const form = useForm({
     line_id: props.item?.line_id ? String(props.item.line_id) : String(props.line.id),
-    work_center_id: props.item?.work_center_id ? String(props.item.work_center_id) : (props.line.default_work_center_id ? String(props.line.default_work_center_id) : ''),
+    work_center_id: initialWcId,
     shift: props.item?.shift ?? props.shift,
     mp_count: props.item?.mp_count ?? 0,
     target_qty: props.item?.target_qty ?? 0,

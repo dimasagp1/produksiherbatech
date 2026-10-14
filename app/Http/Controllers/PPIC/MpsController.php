@@ -146,11 +146,14 @@ class MpsController extends Controller
         $lines = Line::aktif()->with('defaultWorkCenter')->get();
         $workCenters = WorkCenter::active()->get();
 
+        $daysInMonth = Carbon::parse($mps->month_year.'-01')->daysInMonth;
+
         return Inertia::render('PPIC/Mps/Grid', [
             'plan' => $mps,
             'itemsByDate' => $items,
             'lines' => $lines,
             'workCenters' => $workCenters,
+            'daysInMonth' => $daysInMonth,
         ]);
     }
 

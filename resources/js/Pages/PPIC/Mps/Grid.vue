@@ -68,7 +68,7 @@ const props = defineProps<{
     plan: MpsPlan;
     lines: Line[];
     workCenters: WorkCenter[];
-    daysInMonth: number;
+    daysInMonth?: number;
     readOnly?: boolean;
 }>();
 
@@ -80,9 +80,18 @@ const emit = defineEmits<{
 const selectedItem = ref<MpsItem | null>(null);
 const showCellModal = ref(false);
 
+const computedDaysInMonth = computed(() => {
+    if (props.daysInMonth && props.daysInMonth > 0) return props.daysInMonth;
+    if (props.plan?.month_year) {
+        const parts = props.plan.month_year.split('-').map(Number);
+        return new Date(parts[0], parts[1], 0).getDate();
+    }
+    return 30;
+});
+
 const days = computed(() => {
     const arr = [];
-    for (let i = 1; i <= props.daysInMonth; i++) {
+    for (let i = 1; i <= computedDaysInMonth.value; i++) {
         arr.push(i);
     }
     return arr;
@@ -105,11 +114,13 @@ function getItem(day: number, line: Line, shift: string): MpsItem | null {
 function openCellModal(day: number, line: Line, shift: string) {
     if (props.readOnly) return;
     const item = getItem(day, line, shift);
+    const defaultWcId = props.plan.work_center_id ?? line.default_work_center_id ?? null;
+    const defaultWc = defaultWcId ? (props.workCenters.find(wc => wc.id === defaultWcId) ?? null) : null;
     selectedItem.value = item ?? {
         id: 0,
         tanggal: `${props.plan.month_year}-${String(day).padStart(2, '0')}`,
         line_id: line.id,
-        work_center_id: line.default_work_center_id,
+        work_center_id: defaultWcId,
         shift: shift,
         mp_count: 0,
         target_qty: 0,
@@ -118,7 +129,7 @@ function openCellModal(day: number, line: Line, shift: string) {
         gap_reason: null,
         notes: '',
         line: line,
-        workCenter: line.default_work_center_id ? props.workCenters.find(wc => wc.id === line.default_work_center_id) ?? null : null,
+        workCenter: defaultWc,
     } as MpsItem;
     showCellModal.value = true;
 }
@@ -169,7 +180,7 @@ function weekIndex(day: number): number {
 
 function rowWeeklyTotals(line: Line, shift: string): number[] {
     const w = [0, 0, 0, 0, 0];
-    for (let d = 1; d <= props.daysInMonth; d++) {
+    for (let d = 1; d <= computedDaysInMonth.value; d++) {
         const it = getItem(d, line, shift);
         if (it && !it.cleaning) w[weekIndex(d)] += it.target_qty;
     }
@@ -182,7 +193,7 @@ function rowTotal(line: Line, shift: string): number {
 
 function rowAdjTotal(line: Line, shift: string): number {
     let s = 0;
-    for (let d = 1; d <= props.daysInMonth; d++) {
+    for (let d = 1; d <= computedDaysInMonth.value; d++) {
         const it = getItem(d, line, shift);
         if (it && !it.cleaning) s += it.adjusted_qty ?? it.target_qty;
         else if (it && it.cleaning) s += 0;
@@ -210,7 +221,7 @@ function colDayAdjTotal(day: number): number {
 
 function colWeekTotal(wIdx: number): number {
     const start = wIdx * 7 + 1;
-    const end = wIdx === 4 ? props.daysInMonth : (wIdx + 1) * 7;
+    const end = wIdx === 4 ? computedDaysInMonth.value : (wIdx + 1) * 7;
     let s = 0;
     for (let d = start; d <= end; d++) s += colDayTotal(d);
     return s;
@@ -218,7 +229,7 @@ function colWeekTotal(wIdx: number): number {
 
 function colWeekAdjTotal(wIdx: number): number {
     const start = wIdx * 7 + 1;
-    const end = wIdx === 4 ? props.daysInMonth : (wIdx + 1) * 7;
+    const end = wIdx === 4 ? computedDaysInMonth.value : (wIdx + 1) * 7;
     let s = 0;
     for (let d = start; d <= end; d++) s += colDayAdjTotal(d);
     return s;
@@ -289,7 +300,7 @@ const grandAdj = computed(() => props.lines.reduce((a, l) => a + rowAdjTotal(l, 
                 </tbody>
             </table>
         </div>
-        <p class="text-[10px] text-gray-500 dark:text-gray-400">W1=1-7 · W2=8-14 · W3=15-21 · W4=22-28 · W5=29-{{ daysInMonth }} · GAP (Adj-Plan)= {{ (grandAdj - grandPlan).toLocaleString('id-ID') }}</p>
+        <p class="text-[10px] text-gray-500 dark:text-gray-400">W1=1-7 · W2=8-14 · W3=15-21 · W4=22-28 · W5=29-{{ computedDaysInMonth }} · GAP (Adj-Plan)= {{ (grandAdj - grandPlan).toLocaleString('id-ID') }}</p>
 
         <!-- Cell Modal -->
         <CellModal
@@ -297,10 +308,11 @@ const grandAdj = computed(() => props.lines.reduce((a, l) => a + rowAdjTotal(l, 
             :item="selectedItem"
             :line="props.lines.find(l => l.id === selectedItem?.line_id) ?? props.lines[0]"
             :shift="selectedItem?.shift ?? 'shift1'"
-            :day="selectedItem ? parseInt(selectedItem.tanggal.split('-')[2]) : props.daysInMonth"
+            :day="selectedItem ? parseInt(selectedItem.tanggal.split('-')[2]) : computedDaysInMonth"
             :lines="lines"
             :workCenters="workCenters"
             :monthYear="props.plan.month_year"
+            :defaultWorkCenterId="props.plan.work_center_id"
             @update-item="handleUpdateItem"
             @close="showCellModal = false"
         />
