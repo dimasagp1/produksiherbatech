@@ -62,8 +62,27 @@ async function fetchPreview() {
     try {
         const res = await axios.get(route('scm.bom.preview-odoo'));
         if (res.data.success) {
-            boms.value = res.data.data || [];
-            selectedIds.value = boms.value.filter((b) => b.can_sync).map((b) => b.odoo_bom_id);
+            const rawList = res.data.data || [];
+            boms.value = rawList.map((b: any) => ({
+                odoo_bom_id: Number(b.odoo_bom_id),
+                name: b.name || b.product_name || 'BOM Odoo',
+                version: b.version || b.code || '1',
+                line_count: Number(b.line_count ?? b.lines_count ?? (b.items ? b.items.length : 0)),
+                odoo_product_tmpl_id: b.odoo_product_tmpl_id ?? b.product_id ?? null,
+                exists_in_local: b.exists_in_local !== undefined ? Boolean(b.exists_in_local) : (b.local_produk_id !== null || Boolean(b.exists_locally)),
+                local_produk_id: b.local_produk_id ?? null,
+                local_produk_name: b.local_produk_name || (b.exists_in_local ? (b.name || b.product_name) : null),
+                bom_exists: Boolean(b.bom_exists ?? b.exists_locally),
+                can_sync: b.can_sync !== undefined ? Boolean(b.can_sync) : true,
+            }));
+
+            // Pre-select ready ones (or all syncable)
+            const ready = boms.value.filter((b) => b.can_sync && b.exists_in_local);
+            if (ready.length > 0) {
+                selectedIds.value = ready.map((b) => b.odoo_bom_id);
+            } else {
+                selectedIds.value = boms.value.filter((b) => b.can_sync).map((b) => b.odoo_bom_id);
+            }
         } else {
             errorMessage.value = res.data.message || 'Gagal memuat daftar BOM dari Odoo.';
         }
@@ -79,9 +98,9 @@ async function fetchPreview() {
 
 // Counts
 const totalCount = computed(() => boms.value.length);
-const readyCount = computed(() => boms.value.filter((b) => b.can_sync && !b.bom_exists).length);
+const readyCount = computed(() => boms.value.filter((b) => b.exists_in_local && !b.bom_exists).length);
 const existsCount = computed(() => boms.value.filter((b) => b.bom_exists).length);
-const missingCount = computed(() => boms.value.filter((b) => !b.can_sync).length);
+const missingCount = computed(() => boms.value.filter((b) => !b.exists_in_local).length);
 const selectedCount = computed(() => selectedIds.value.length);
 
 // Filtered list
@@ -89,9 +108,9 @@ const filteredBoms = computed(() => {
     let list = boms.value;
 
     if (activeFilter.value === 'ready') {
-        list = list.filter((b) => b.can_sync && !b.bom_exists);
+        list = list.filter((b) => b.exists_in_local && !b.bom_exists);
     } else if (activeFilter.value === 'missing') {
-        list = list.filter((b) => !b.can_sync);
+        list = list.filter((b) => !b.exists_in_local);
     } else if (activeFilter.value === 'exists') {
         list = list.filter((b) => b.bom_exists);
     } else if (activeFilter.value === 'selected') {
@@ -103,8 +122,8 @@ const filteredBoms = computed(() => {
         const q = searchQuery.value.toLowerCase().trim();
         list = list.filter(
             (b) =>
-                b.name.toLowerCase().includes(q) ||
-                b.version.toLowerCase().includes(q) ||
+                (b.name && b.name.toLowerCase().includes(q)) ||
+                (b.version && b.version.toLowerCase().includes(q)) ||
                 (b.local_produk_name && b.local_produk_name.toLowerCase().includes(q)),
         );
     }
@@ -133,6 +152,15 @@ function toggleSelectAllFiltered() {
 }
 
 function selectOnlyReady() {
+    const ready = boms.value.filter((b) => b.can_sync && b.exists_in_local);
+    if (ready.length > 0) {
+        selectedIds.value = ready.map((b) => b.odoo_bom_id);
+    } else {
+        selectedIds.value = boms.value.filter((b) => b.can_sync).map((b) => b.odoo_bom_id);
+    }
+}
+
+function selectAll() {
     selectedIds.value = boms.value.filter((b) => b.can_sync).map((b) => b.odoo_bom_id);
 }
 
@@ -312,6 +340,10 @@ async function handleSyncSubmit() {
                                 Pilih yang Siap Sync
                             </button>
                             <span>·</span>
+                            <button type="button" class="font-medium text-slate-600 hover:underline dark:text-slate-300" @click="selectAll">
+                                Pilih Semua
+                            </button>
+                            <span>·</span>
                             <button type="button" class="font-medium text-rose-600 hover:underline dark:text-rose-400" @click="clearSelection">
                                 Batalkan Pilihan
                             </button>
@@ -388,13 +420,13 @@ async function handleSyncSubmit() {
                                         <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                                         </svg>
-                                        Cocok: {{ bom.local_produk_name }}
+                                        Cocok: {{ bom.local_produk_name || bom.name }}
                                     </span>
                                     <span
                                         v-else
                                         class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-300"
                                     >
-                                        Produk belum ada di lokal
+                                        Produk belum ada (auto-create)
                                     </span>
                                 </td>
                             </tr>

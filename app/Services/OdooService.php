@@ -713,6 +713,7 @@ class OdooService
         }
 
         $fallback = $produk?->proses_default ?: 'mixing';
+
         return $fallback === 'packing' ? 'secondary' : $fallback;
     }
 
@@ -1591,7 +1592,9 @@ class OdooService
                     $weeklyPlan = WeeklyPlan::withTrashed()->where('odoo_mo_id', $moId)->first();
                     if (! $weeklyPlan && $localProduk) {
                         $fallbackProses = $localProduk->proses_default ?: 'secondary';
-                        if ($fallbackProses === 'packing') $fallbackProses = 'secondary';
+                        if ($fallbackProses === 'packing') {
+                            $fallbackProses = 'secondary';
+                        }
                         $weeklyPlan = WeeklyPlan::create([
                             'produk_id' => $localProduk->id,
                             'proses' => $fallbackProses,
@@ -2077,6 +2080,23 @@ class OdooService
         $existingBomMap = Bom::pluck('id', 'odoo_bom_id')->toArray();
         $existingProductBoms = Bom::pluck('id', 'produk_id')->toArray();
 
+        // Pre-fetch local products to prevent N+1 queries
+        $allProductOdooIds = [];
+        $allProductNames = [];
+        foreach ($odooBoms as $b) {
+            $pId = is_array($b['product_id'] ?? null) ? (int) $b['product_id'][0] : (is_array($b['product_tmpl_id'] ?? null) ? (int) $b['product_tmpl_id'][0] : null);
+            $pName = is_array($b['product_id'] ?? null) ? $b['product_id'][1] : (is_array($b['product_tmpl_id'] ?? null) ? $b['product_tmpl_id'][1] : null);
+            if ($pId) {
+                $allProductOdooIds[] = $pId;
+            }
+            if ($pName) {
+                $allProductNames[] = $pName;
+            }
+        }
+
+        $localProduksByOdooId = Produk::whereIn('odoo_id', array_filter($allProductOdooIds))->get()->keyBy('odoo_id');
+        $localProduksByName = Produk::whereIn('nama_produk', array_filter($allProductNames))->get()->keyBy('nama_produk');
+
         $result = [];
         foreach ($odooBoms as $b) {
             $odooBomId = (int) $b['id'];
@@ -2103,23 +2123,31 @@ class OdooService
                 ];
             }
 
-            $localProduk = null;
-            if ($pId) {
-                $localProduk = Produk::where('odoo_id', $pId)->orWhere('nama_produk', $pName)->first();
-            }
+            $localProduk = ($pId && isset($localProduksByOdooId[$pId]))
+                ? $localProduksByOdooId[$pId]
+                : ($pName && isset($localProduksByName[$pName]) ? $localProduksByName[$pName] : null);
 
             $exists = isset($existingBomMap[$odooBomId]) || ($localProduk && isset($existingProductBoms[$localProduk->id]));
 
             $result[] = [
                 'odoo_bom_id' => $odooBomId,
+                'name' => $pName,
                 'product_name' => $pName,
                 'product_id' => $pId,
+                'odoo_product_tmpl_id' => $pId,
+                'version' => $code,
                 'code' => $code,
                 'base_qty' => $baseQty,
                 'uom' => $uomName,
+                'line_count' => count($items),
                 'lines_count' => count($items),
                 'items' => $items,
+                'exists_in_local' => $localProduk !== null,
                 'exists_locally' => $exists,
+                'local_produk_id' => $localProduk?->id,
+                'local_produk_name' => $localProduk?->nama_produk,
+                'bom_exists' => $exists,
+                'can_sync' => (bool) $pId,
             ];
         }
 
