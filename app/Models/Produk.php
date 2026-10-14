@@ -80,6 +80,11 @@ class Produk extends Model
         return $query->where('status_aktif', true);
     }
 
+    public function scopeFg($query)
+    {
+        return $query->where('item_type', 'fg');
+    }
+
     public function getEffectiveCtAttribute(): int
     {
         return $this->ct_seconds ?? $this->workCenter?->standard_ct_seconds ?? 0;

@@ -58,6 +58,8 @@ class MpsTest extends TestCase
             'nama_produk' => 'Test Produk',
             'kode_produk' => 'TEST001',
             'work_center_id' => $this->wcMixing->id,
+            'item_type' => 'fg',
+            'status_aktif' => true,
         ]);
 
         $this->lineA = Line::factory()->create([
@@ -116,6 +118,110 @@ class MpsTest extends TestCase
         ]);
 
         $response->assertSessionHasErrors('month_year');
+    }
+
+    public function test_cannot_create_mps_plan_for_non_fg_product()
+    {
+        $rmProduk = Produk::factory()->create([
+            'nama_produk' => 'Bahan Baku Herbal RM',
+            'kode_produk' => 'RM001',
+            'item_type' => 'rm',
+            'status_aktif' => true,
+        ]);
+
+        $pmProduk = Produk::factory()->create([
+            'nama_produk' => 'Packaging Botol 100ml PM',
+            'kode_produk' => 'PM001',
+            'item_type' => 'pm',
+            'status_aktif' => true,
+        ]);
+
+        // Attempt with RM
+        $responseRm = $this->actingAs($this->ppicUser)->post(route('ppic.mps.store'), [
+            'produk_id' => $rmProduk->id,
+            'work_center_id' => $this->wcMixing->id,
+            'month_year' => '2026-11',
+        ]);
+        $responseRm->assertSessionHasErrors('produk_id');
+
+        // Attempt with PM
+        $responsePm = $this->actingAs($this->ppicUser)->post(route('ppic.mps.store'), [
+            'produk_id' => $pmProduk->id,
+            'work_center_id' => $this->wcMixing->id,
+            'month_year' => '2026-11',
+        ]);
+        $responsePm->assertSessionHasErrors('produk_id');
+
+        $this->assertDatabaseMissing('mps_plans', [
+            'produk_id' => $rmProduk->id,
+        ]);
+        $this->assertDatabaseMissing('mps_plans', [
+            'produk_id' => $pmProduk->id,
+        ]);
+    }
+
+    public function test_mps_index_and_create_only_load_fg_products_and_batches()
+    {
+        $rmProduk = Produk::factory()->create([
+            'nama_produk' => 'Bahan Baku A',
+            'kode_produk' => 'RM-A',
+            'item_type' => 'rm',
+            'status_aktif' => true,
+        ]);
+
+        // Weekly plan batch on RM
+        WeeklyPlan::create([
+            'produk_id' => $rmProduk->id,
+            'work_center_id' => $this->wcMixing->id,
+            'line_id' => $this->lineA->id,
+            'proses' => 'mixing',
+            'shift' => 'shift1',
+            'batch_number' => 'BATCH-RM-001',
+            'tanggal' => now()->toDateString(),
+            'status' => 'draft',
+            'created_by' => $this->ppicUser->id,
+        ]);
+
+        // Weekly plan batch on FG ($this->produk)
+        WeeklyPlan::create([
+            'produk_id' => $this->produk->id,
+            'work_center_id' => $this->wcMixing->id,
+            'line_id' => $this->lineA->id,
+            'proses' => 'mixing',
+            'shift' => 'shift1',
+            'batch_number' => 'BATCH-FG-001',
+            'tanggal' => now()->toDateString(),
+            'status' => 'draft',
+            'created_by' => $this->ppicUser->id,
+        ]);
+
+        // Test Index
+        $responseIndex = $this->actingAs($this->ppicUser)->get(route('ppic.mps.index'));
+        $responseIndex->assertOk();
+        $responseIndex->assertInertia(fn ($page) => $page
+            ->component('PPIC/Mps/Index')
+            ->where('produks', fn ($list) => collect($list)->contains('id', $this->produk->id)
+                && ! collect($list)->contains('id', $rmProduk->id)
+                && collect($list)->every(fn ($p) => $p['item_type'] === 'fg')
+            )
+            ->where('odooBatches', fn ($list) => collect($list)->contains('batch_number', 'BATCH-FG-001')
+                && ! collect($list)->contains('batch_number', 'BATCH-RM-001')
+            )
+        );
+
+        // Test Create
+        $responseCreate = $this->actingAs($this->ppicUser)->get(route('ppic.mps.create'));
+        $responseCreate->assertOk();
+        $responseCreate->assertInertia(fn ($page) => $page
+            ->component('PPIC/Mps/Create')
+            ->where('produks', fn ($list) => collect($list)->contains('id', $this->produk->id)
+                && ! collect($list)->contains('id', $rmProduk->id)
+                && collect($list)->every(fn ($p) => $p['item_type'] === 'fg')
+            )
+            ->where('odooBatches', fn ($list) => collect($list)->contains('batch_number', 'BATCH-FG-001')
+                && ! collect($list)->contains('batch_number', 'BATCH-RM-001')
+            )
+        );
     }
 
     public function test_only_ppic_and_superadmin_can_access_mps()

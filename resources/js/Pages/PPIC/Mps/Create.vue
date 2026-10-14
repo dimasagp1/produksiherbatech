@@ -11,6 +11,7 @@ interface Produk {
     id: number;
     kode_produk?: string;
     nama_produk: string;
+    item_type?: string;
 }
 
 interface WorkCenter {
@@ -156,7 +157,12 @@ function submit() {
             <form class="space-y-6" @submit.prevent="submit">
                 <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-700 dark:bg-slate-800">
                     <div class="mb-4">
-                        <InputLabel value="Produk" />
+                        <div class="flex items-center justify-between">
+                            <InputLabel value="Produk Finish Good (FG)" />
+                            <span class="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                                Khusus FG
+                            </span>
+                        </div>
                         <button
                             type="button"
                             @click="toggleProdukDropdown"
@@ -172,7 +178,7 @@ function submit() {
                                 {{
                                     selectedProduk
                                         ? `${selectedProduk.nama_produk} (${selectedProduk.kode_produk})`
-                                        : 'Pilih Produk'
+                                        : 'Pilih Produk Finish Good (FG)'
                                 }}
                             </span>
                             <svg
@@ -203,14 +209,14 @@ function submit() {
                                     <input
                                         v-model="produkSearch"
                                         type="search"
-                                        placeholder="Cari nama atau kode produk..."
+                                        placeholder="Cari nama atau kode produk Finish Good (FG)..."
                                         class="block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs shadow-xs placeholder:text-slate-400 focus:border-indigo-500 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:placeholder:text-slate-500"
                                         autofocus
                                     />
                                     <p
                                         class="mt-1 px-1 text-[10px] text-slate-500 dark:text-slate-400"
                                     >
-                                        Hanya produk aktif · {{ filteredProduks.length }} dari
+                                        Khusus Finish Good (FG) aktif · {{ filteredProduks.length }} dari
                                         {{ produks.length }} produk
                                     </p>
                                 </div>
@@ -233,8 +239,13 @@ function submit() {
                                                 : 'text-slate-700 dark:text-slate-300'
                                         "
                                     >
-                                        <div class="font-medium">
-                                            {{ p.nama_produk }}
+                                        <div class="flex items-center justify-between gap-2">
+                                            <div class="font-medium">
+                                                {{ p.nama_produk }}
+                                            </div>
+                                            <span class="shrink-0 rounded bg-emerald-50 px-1 py-0.2 text-[9px] font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                                                FG
+                                            </span>
                                         </div>
                                         <div
                                             class="text-[10px] text-slate-400 dark:text-slate-500 font-mono"
@@ -246,7 +257,7 @@ function submit() {
                                         v-if="filteredProduks.length === 0"
                                         class="px-3 py-4 text-center text-xs text-slate-400"
                                     >
-                                        Tidak ada produk yang cocok dengan "{{
+                                        Produk Finish Good tidak ditemukan untuk "{{
                                             produkSearch
                                         }}"
                                     </li>
@@ -265,7 +276,7 @@ function submit() {
                                 v-if="currentCreateProductBatches.length > 0"
                                 class="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400"
                             >
-                                {{ currentCreateProductBatches.length }} Batch Odoo Tersedia
+                                {{ currentCreateProductBatches.length }} Batch Odoo (FG) Tersedia
                             </span>
                         </div>
                         <input
@@ -273,7 +284,7 @@ function submit() {
                             type="text"
                             list="mps-create-page-batch-list"
                             class="mt-1.5 block w-full rounded-xl border-slate-300 font-mono text-xs text-slate-900 shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                            placeholder="Pilih batch Odoo di bawah atau ketik nomor batch..."
+                            placeholder="Pilih batch Odoo (FG) di bawah atau ketik nomor batch..."
                         />
                         <datalist id="mps-create-page-batch-list">
                             <option
@@ -295,7 +306,7 @@ function submit() {
                                     <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                                     </svg>
-                                    Pilih Batch Bawaan Odoo:
+                                    Pilih Batch Bawaan Odoo (FG):
                                 </span>
                                 <span class="text-[10px] text-slate-500 dark:text-slate-400">Klik untuk memilih & atur Work Center</span>
                             </div>

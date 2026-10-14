@@ -3,6 +3,7 @@
 namespace App\Http\Requests\PPIC;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreMpsPlanRequest extends FormRequest
 {
@@ -14,7 +15,10 @@ class StoreMpsPlanRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'produk_id' => 'required|exists:produks,id',
+            'produk_id' => [
+                'required',
+                Rule::exists('produks', 'id')->where(fn ($q) => $q->where('item_type', 'fg')->where('status_aktif', true)->whereNull('deleted_at')),
+            ],
             'work_center_id' => 'required|exists:work_centers,id',
             'batch_number' => 'nullable|string|max:100',
             'month_year' => 'required|date_format:Y-m',
@@ -26,6 +30,7 @@ class StoreMpsPlanRequest extends FormRequest
     {
         return [
             'produk_id.required' => 'Produk wajib dipilih.',
+            'produk_id.exists' => 'Produk yang dipilih tidak valid atau bukan produk Finish Good (FG) aktif.',
             'work_center_id.required' => 'Work Center wajib dipilih.',
             'month_year.required' => 'Bulan & Tahun wajib diisi.',
             'month_year.date_format' => 'Format Bulan & Tahun harus YYYY-MM.',

@@ -13,6 +13,7 @@ interface Produk {
     id: number;
     kode_produk: string;
     nama_produk: string;
+    item_type?: string;
 }
 
 interface WorkCenter {
@@ -465,7 +466,12 @@ function getStatusLabel(status: string): string {
             <template #content>
                 <form id="create-form" @submit.prevent="submitCreate" class="space-y-4">
                     <div class="mb-3">
-                        <InputLabel value="Produk" />
+                        <div class="flex items-center justify-between">
+                            <InputLabel value="Produk Finish Good (FG)" />
+                            <span class="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                                Khusus FG
+                            </span>
+                        </div>
                         <button
                             type="button"
                             @click="toggleProdukDropdown"
@@ -481,7 +487,7 @@ function getStatusLabel(status: string): string {
                                 {{
                                     selectedProduk
                                         ? `${selectedProduk.nama_produk} (${selectedProduk.kode_produk})`
-                                        : 'Pilih Produk'
+                                        : 'Pilih Produk Finish Good (FG)'
                                 }}
                             </span>
                             <svg
@@ -512,14 +518,14 @@ function getStatusLabel(status: string): string {
                                     <input
                                         v-model="produkSearch"
                                         type="search"
-                                        placeholder="Cari nama atau kode produk..."
+                                        placeholder="Cari nama atau kode produk Finish Good (FG)..."
                                         class="block w-full rounded-md border-gray-300 px-3 py-1.5 text-sm shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:placeholder:text-gray-500"
                                         autofocus
                                     />
                                     <p
                                         class="mt-1 px-1 text-[10px] text-gray-500 dark:text-gray-400"
                                     >
-                                        Hanya produk aktif · {{ filteredProduks.length }} dari
+                                        Khusus Finish Good (FG) aktif · {{ filteredProduks.length }} dari
                                         {{ produks.length }} produk
                                     </p>
                                 </div>
@@ -542,16 +548,21 @@ function getStatusLabel(status: string): string {
                                                 : 'text-gray-700 dark:text-gray-300'
                                         "
                                     >
-                                        {{ p.nama_produk }}
-                                        <span class="font-mono text-[11px] text-gray-400"
-                                            >({{ p.kode_produk }})</span
-                                        >
+                                        <div class="flex items-center justify-between gap-2">
+                                            <div>
+                                                <span>{{ p.nama_produk }}</span>
+                                                <span class="ml-1 font-mono text-[11px] text-gray-400">({{ p.kode_produk }})</span>
+                                            </div>
+                                            <span class="shrink-0 rounded bg-emerald-50 px-1 py-0.2 text-[9px] font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                                                FG
+                                            </span>
+                                        </div>
                                     </li>
                                     <li
                                         v-if="filteredProduks.length === 0"
                                         class="px-3 py-4 text-center text-xs text-gray-400"
                                     >
-                                        Produk tidak ditemukan
+                                        Produk Finish Good tidak ditemukan untuk "{{ produkSearch }}"
                                     </li>
                                 </ul>
                             </div>
@@ -570,7 +581,7 @@ function getStatusLabel(status: string): string {
                                 v-if="currentCreateProductBatches.length > 0"
                                 class="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400"
                             >
-                                {{ currentCreateProductBatches.length }} Batch Odoo Tersedia
+                                {{ currentCreateProductBatches.length }} Batch Odoo (FG) Tersedia
                             </span>
                         </div>
                         <input
@@ -578,7 +589,7 @@ function getStatusLabel(status: string): string {
                             type="text"
                             list="mps-create-batch-list"
                             class="mt-1.5 block w-full rounded-xl border-gray-300 font-mono text-xs text-gray-900 shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-                            placeholder="Pilih batch Odoo di bawah atau ketik nomor batch..."
+                            placeholder="Pilih batch Odoo (FG) di bawah atau ketik nomor batch..."
                         />
                         <datalist id="mps-create-batch-list">
                             <option
@@ -600,7 +611,7 @@ function getStatusLabel(status: string): string {
                                     <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                                     </svg>
-                                    Pilih Batch Bawaan Odoo:
+                                    Pilih Batch Bawaan Odoo (FG):
                                 </span>
                                 <span class="text-[10px] text-gray-500">Klik untuk memilih & atur Work Center</span>
                             </div>

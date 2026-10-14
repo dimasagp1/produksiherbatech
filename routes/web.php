@@ -114,6 +114,7 @@ Route::middleware(['auth', 'role:ppic|superadmin|manager|warehouse_admin'])->pre
 
 // PPIC routes - MPS (Master Production Schedule)
 Route::middleware(['auth', 'role:ppic|superadmin|manager'])->prefix('ppic')->name('ppic.')->group(function () {
+    Route::get('mps/create', [MpsController::class, 'create'])->name('mps.create');
     Route::resource('mps', MpsController::class)->only(['index', 'show'])->parameters(['mps' => 'mps']);
     Route::get('mps/{mps}/grid', [MpsController::class, 'grid'])->name('mps.grid');
     Route::get('mps/{mps}/export', [MpsController::class, 'export'])->name('mps.export');
@@ -128,7 +129,6 @@ Route::middleware(['auth', 'role:ppic|superadmin|manager'])->prefix('ppic')->nam
     // Write operations - only ppic and superadmin
     Route::middleware(['role:ppic|superadmin'])->group(function () {
         Route::post('mps', [MpsController::class, 'store'])->name('mps.store');
-        Route::get('mps/create', [MpsController::class, 'create'])->name('mps.create');
         Route::post('mps/{mps}/approve', [MpsController::class, 'approve'])->name('mps.approve');
         Route::post('mps/{mps}/activate', [MpsController::class, 'activate'])->name('mps.activate');
         Route::post('mps/{mps}/generate-weekly', [MpsController::class, 'generateWeeklyPlans'])->name('mps.generate-weekly');

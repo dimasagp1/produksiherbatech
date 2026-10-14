@@ -36,9 +36,10 @@ class MpsController extends Controller
             ->paginate(15)
             ->withQueryString();
 
-        $produks = Produk::aktif()->get(['id', 'kode_produk', 'nama_produk']);
+        $produks = Produk::aktif()->fg()->get(['id', 'kode_produk', 'nama_produk', 'item_type']);
         $workCenters = WorkCenter::active()->get(['id', 'code', 'name', 'type', 'is_active']);
         $odooBatches = WeeklyPlan::whereNotNull('batch_number')
+            ->whereHas('produk', fn ($q) => $q->where('item_type', 'fg'))
             ->select(['id', 'produk_id', 'batch_number', 'proses', 'odoo_mo_id', 'mo_status', 'target_output'])
             ->orderByDesc('id')
             ->get();
@@ -67,9 +68,10 @@ class MpsController extends Controller
     {
         $this->checkReadOnly();
 
-        $produks = Produk::aktif()->get(['id', 'kode_produk', 'nama_produk']);
+        $produks = Produk::aktif()->fg()->get(['id', 'kode_produk', 'nama_produk', 'item_type']);
         $workCenters = WorkCenter::active()->get(['id', 'code', 'name', 'type', 'is_active']);
         $odooBatches = WeeklyPlan::whereNotNull('batch_number')
+            ->whereHas('produk', fn ($q) => $q->where('item_type', 'fg'))
             ->select(['id', 'produk_id', 'batch_number', 'proses', 'odoo_mo_id', 'mo_status', 'target_output'])
             ->orderByDesc('id')
             ->get();
