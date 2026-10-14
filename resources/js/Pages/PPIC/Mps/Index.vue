@@ -107,8 +107,67 @@ watch([monthYearInput, statusFilter], () => {
     applyFilters();
 });
 
+const produkSearch = ref('');
+const produkDropdownOpen = ref(false);
+
+const filteredProduks = computed(() => {
+    const q = produkSearch.value.trim().toLowerCase();
+    const list = q
+        ? props.produks.filter(
+              (p) =>
+                  p.nama_produk.toLowerCase().includes(q) ||
+                  (p.kode_produk ?? '').toLowerCase().includes(q),
+          )
+        : props.produks;
+
+    return [...list].sort((a, b) =>
+        a.nama_produk.localeCompare(b.nama_produk, 'id'),
+    );
+});
+
+const selectedProduk = computed(() =>
+    props.produks.find((p) => p.id === Number(createForm.produk_id)),
+);
+
+function toggleProdukDropdown() {
+    produkDropdownOpen.value = !produkDropdownOpen.value;
+    if (produkDropdownOpen.value) {
+        produkSearch.value = '';
+    }
+}
+
+function chooseProduk(p: Produk) {
+    createForm.produk_id = String(p.id);
+    createForm.clearErrors('produk_id');
+    produkDropdownOpen.value = false;
+    produkSearch.value = '';
+}
+
 function openCreate() {
+    createForm.reset();
+    createForm.clearErrors();
+    createForm.month_year = props.monthYear;
+    produkSearch.value = '';
+    produkDropdownOpen.value = false;
     showCreate.value = true;
+}
+
+function closeCreate() {
+    showCreate.value = false;
+    produkDropdownOpen.value = false;
+    produkSearch.value = '';
+}
+
+function submitCreate() {
+    if (!createForm.produk_id) {
+        createForm.setError('produk_id', 'Silakan pilih produk terlebih dahulu.');
+        return;
+    }
+    createForm.post(route('ppic.mps.store'), {
+        onSuccess: () => {
+            closeCreate();
+        },
+    });
 }
 
 function openDelete(id: number) {
@@ -316,23 +375,106 @@ function getStatusLabel(status: string): string {
         </div>
 
         <!-- Create Modal -->
-        <Modal :show="showCreate" @close="showCreate = false">
+        <Modal :show="showCreate" @close="closeCreate">
             <template #title>Buat MPS Plan Baru</template>
             <template #content>
-                <form id="create-form" @submit.prevent="createForm.post(route('ppic.mps.store'))" class="space-y-4">
-                    <div>
+                <form id="create-form" @submit.prevent="submitCreate" class="space-y-4">
+                    <div class="mb-3">
                         <InputLabel value="Produk" />
-                        <select
-                            v-model="createForm.produk_id"
-                            class="mt-1.5 block w-full rounded-xl border-gray-300 text-xs text-gray-900 shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-                            required
+                        <button
+                            type="button"
+                            @click="toggleProdukDropdown"
+                            class="mt-1 flex w-full items-center justify-between gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm shadow-sm hover:border-indigo-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                         >
-                            <option value="" disabled>Pilih Produk</option>
-                            <option v-for="p in produks" :key="p.id" :value="p.id">
-                                {{ p.nama_produk }} ({{ p.kode_produk }})
-                            </option>
-                        </select>
-                        <InputError :message="createForm.errors.produk_id" class="mt-1" />
+                            <span
+                                :class="
+                                    selectedProduk
+                                        ? 'text-gray-900 dark:text-gray-100'
+                                        : 'text-gray-400 dark:text-gray-500'
+                                "
+                            >
+                                {{
+                                    selectedProduk
+                                        ? `${selectedProduk.nama_produk} (${selectedProduk.kode_produk})`
+                                        : 'Pilih Produk'
+                                }}
+                            </span>
+                            <svg
+                                class="h-4 w-4 shrink-0 text-gray-400 transition-transform"
+                                :class="produkDropdownOpen ? 'rotate-180' : ''"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M19 9l-7 7-7-7"
+                                />
+                            </svg>
+                        </button>
+
+                        <div v-if="produkDropdownOpen" class="relative mt-1">
+                            <div
+                                class="fixed inset-0 z-10"
+                                @click="produkDropdownOpen = false"
+                            ></div>
+                            <div
+                                class="relative z-20 rounded-md border border-gray-300 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                            >
+                                <div class="border-b border-gray-100 p-2 dark:border-gray-700">
+                                    <input
+                                        v-model="produkSearch"
+                                        type="search"
+                                        placeholder="Cari nama atau kode produk..."
+                                        class="block w-full rounded-md border-gray-300 px-3 py-1.5 text-sm shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:placeholder:text-gray-500"
+                                        autofocus
+                                    />
+                                    <p
+                                        class="mt-1 px-1 text-[10px] text-gray-500 dark:text-gray-400"
+                                    >
+                                        Hanya produk aktif · {{ filteredProduks.length }} dari
+                                        {{ produks.length }} produk
+                                    </p>
+                                </div>
+                                <ul
+                                    class="max-h-56 overflow-y-auto py-1"
+                                    role="listbox"
+                                >
+                                    <li
+                                        v-for="p in filteredProduks"
+                                        :key="p.id"
+                                        role="option"
+                                        :aria-selected="
+                                            Number(createForm.produk_id) === p.id
+                                        "
+                                        @click="chooseProduk(p)"
+                                        class="cursor-pointer px-3 py-2 text-sm hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                                        :class="
+                                            Number(createForm.produk_id) === p.id
+                                                ? 'bg-indigo-50 font-semibold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200'
+                                                : 'text-gray-700 dark:text-gray-300'
+                                        "
+                                    >
+                                        {{ p.nama_produk }}
+                                        <span class="font-mono text-[11px] text-gray-400"
+                                            >({{ p.kode_produk }})</span
+                                        >
+                                    </li>
+                                    <li
+                                        v-if="filteredProduks.length === 0"
+                                        class="px-3 py-4 text-center text-xs text-gray-400"
+                                    >
+                                        Produk tidak ditemukan
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                        <InputError
+                            :message="createForm.errors.produk_id"
+                            class="mt-1"
+                        />
                     </div>
 
                     <div>
@@ -382,7 +524,7 @@ function getStatusLabel(status: string): string {
                 </form>
             </template>
             <template #footer>
-                <SecondaryButton @click="showCreate = false">Batal</SecondaryButton>
+                <SecondaryButton @click="closeCreate">Batal</SecondaryButton>
                 <PrimaryButton :disabled="createForm.processing" type="submit" form="create-form">
                     {{ createForm.processing ? 'Menyimpan...' : 'Simpan MPS Plan' }}
                 </PrimaryButton>
