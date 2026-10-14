@@ -81,8 +81,23 @@ class MpsTest extends TestCase
 
     public function test_ppic_can_view_mps_index()
     {
-        $response = $this->actingAs($this->ppicUser)->get(route('ppic.mps.index'));
+        $plan = MpsPlan::factory()->create([
+            'produk_id' => $this->produk->id,
+            'work_center_id' => $this->wcMixing->id,
+            'month_year' => '2026-10',
+        ]);
+        MpsItem::factory()->count(2)->create([
+            'mps_plan_id' => $plan->id,
+            'work_center_id' => $this->wcMixing->id,
+            'line_id' => $this->lineA->id,
+        ]);
+
+        $response = $this->actingAs($this->ppicUser)->get(route('ppic.mps.index', ['month_year' => '2026-10']));
         $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('PPIC/Mps/Index')
+            ->where('plans.data.0.items_count', 2)
+        );
     }
 
     public function test_ppic_can_create_mps_plan()

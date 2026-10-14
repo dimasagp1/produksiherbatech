@@ -14,6 +14,7 @@ interface Produk {
     kode_produk: string;
     nama_produk: string;
     item_type?: string;
+    work_center_id?: number | null;
 }
 
 interface WorkCenter {
@@ -44,6 +45,7 @@ interface MpsPlan {
     workCenter?: WorkCenter;
     creator: { id: number; name: string };
     items_count: number;
+    items?: any[];
 }
 
 interface OdooBatch {
@@ -183,7 +185,8 @@ function selectBatch(b: OdooBatch) {
     createForm.batch_number = b.batch_number;
     createForm.clearErrors('batch_number');
     if (b.proses) {
-        const wc = props.workCenters.find(w => w.type === b.proses && w.is_active);
+        const targetType = b.proses === 'packing' ? 'secondary' : b.proses;
+        const wc = props.workCenters.find(w => (w.type === targetType || w.type === b.proses) && w.is_active);
         if (wc) {
             createForm.work_center_id = String(wc.id);
         }
@@ -200,14 +203,29 @@ function toggleProdukDropdown() {
 function chooseProduk(p: Produk) {
     createForm.produk_id = String(p.id);
     createForm.clearErrors('produk_id');
-    createForm.batch_number = '';
     produkDropdownOpen.value = false;
     produkSearch.value = '';
 
-    // Auto-select if exactly 1 batch exists from Odoo
-    const batches = currentCreateProductBatches.value;
-    if (batches.length === 1) {
+    // Set work center from product default if available
+    if (p.work_center_id) {
+        createForm.work_center_id = String(p.work_center_id);
+    }
+
+    // Batches from Odoo for this product
+    const batches = (props.odooBatches ?? []).filter(
+        (b) => b.produk_id === p.id && b.batch_number,
+    );
+
+    if (batches.length > 0) {
+        // Auto select the first batch from Odoo (sama seperti di Tambah Weekly Plan)
         selectBatch(batches[0]);
+    } else {
+        // Fallback auto-format batch number jika produk belum ada batch Odoo
+        const prefix = p.kode_produk ? p.kode_produk.replace(/[^a-zA-Z0-9]/g, '') : 'PRD';
+        const now = new Date();
+        const dateTag = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+        createForm.batch_number = `${prefix}/${dateTag}/001`;
+        createForm.clearErrors('batch_number');
     }
 }
 
@@ -407,7 +425,7 @@ function getStatusLabel(status: string): string {
                                     </span>
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">
-                                    {{ plan.items_count }}
+                                    {{ plan.items_count ?? plan.items?.length ?? 0 }}
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3 text-right">
                                     <div class="flex items-center justify-end gap-1.5">

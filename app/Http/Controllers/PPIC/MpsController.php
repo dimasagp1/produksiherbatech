@@ -29,6 +29,7 @@ class MpsController extends Controller
         $status = $request->input('status', 'all');
 
         $plans = MpsPlan::with(['produk', 'workCenter', 'creator', 'items.line'])
+            ->withCount('items')
             ->when($monthYear, fn ($q, $m) => $q->where('month_year', $m))
             ->when($status !== 'all', fn ($q, $s) => $q->where('status', $s))
             ->latest('month_year')
@@ -36,7 +37,7 @@ class MpsController extends Controller
             ->paginate(15)
             ->withQueryString();
 
-        $produks = Produk::aktif()->fg()->get(['id', 'kode_produk', 'nama_produk', 'item_type']);
+        $produks = Produk::aktif()->fg()->get(['id', 'kode_produk', 'nama_produk', 'item_type', 'work_center_id']);
         $workCenters = WorkCenter::active()->get(['id', 'code', 'name', 'type', 'is_active']);
         $odooBatches = WeeklyPlan::whereNotNull('batch_number')
             ->whereHas('produk', fn ($q) => $q->where('item_type', 'fg'))
@@ -68,7 +69,7 @@ class MpsController extends Controller
     {
         $this->checkReadOnly();
 
-        $produks = Produk::aktif()->fg()->get(['id', 'kode_produk', 'nama_produk', 'item_type']);
+        $produks = Produk::aktif()->fg()->get(['id', 'kode_produk', 'nama_produk', 'item_type', 'work_center_id']);
         $workCenters = WorkCenter::active()->get(['id', 'code', 'name', 'type', 'is_active']);
         $odooBatches = WeeklyPlan::whereNotNull('batch_number')
             ->whereHas('produk', fn ($q) => $q->where('item_type', 'fg'))
