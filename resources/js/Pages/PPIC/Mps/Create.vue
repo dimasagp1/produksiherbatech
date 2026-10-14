@@ -25,15 +25,27 @@ interface WorkCenter {
     is_active: boolean;
 }
 
+interface OdooBatch {
+    id: number;
+    produk_id: number;
+    batch_number: string;
+    proses?: string;
+    odoo_mo_id?: number | null;
+    mo_status?: string;
+    target_output?: number;
+}
+
 const props = defineProps<{
     produks: Produk[];
     workCenters: WorkCenter[];
+    odooBatches?: OdooBatch[];
     defaultMonth: string;
 }>();
 
 const createForm = useForm({
     produk_id: '',
     work_center_id: '',
+    batch_number: '',
     month_year: props.defaultMonth,
     notes: '',
 });
@@ -60,6 +72,35 @@ const selectedProduk = computed(() =>
     props.produks.find((p) => p.id === Number(createForm.produk_id)),
 );
 
+const currentCreateProductBatches = computed(() => {
+    const pId = Number(createForm.produk_id);
+    if (!pId || !props.odooBatches) return [];
+
+    const list: OdooBatch[] = [];
+    const seen = new Set<string>();
+    for (const b of props.odooBatches) {
+        if (b.produk_id === pId && b.batch_number) {
+            const key = `${b.batch_number}-${b.proses ?? ''}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                list.push(b);
+            }
+        }
+    }
+    return list;
+});
+
+function selectBatch(b: OdooBatch) {
+    createForm.batch_number = b.batch_number;
+    createForm.clearErrors('batch_number');
+    if (b.proses) {
+        const wc = props.workCenters.find(w => w.type === b.proses && w.is_active);
+        if (wc) {
+            createForm.work_center_id = String(wc.id);
+        }
+    }
+}
+
 function toggleProdukDropdown() {
     produkDropdownOpen.value = !produkDropdownOpen.value;
     if (produkDropdownOpen.value) {
@@ -69,8 +110,15 @@ function toggleProdukDropdown() {
 
 function chooseProduk(p: Produk) {
     createForm.produk_id = String(p.id);
+    createForm.clearErrors('produk_id');
+    createForm.batch_number = '';
     produkDropdownOpen.value = false;
     produkSearch.value = '';
+
+    const batches = currentCreateProductBatches.value;
+    if (batches.length === 1) {
+        selectBatch(batches[0]);
+    }
 }
 
 function submit() {
@@ -207,6 +255,83 @@ function submit() {
                         </div>
 
                         <InputError :message="createForm.errors.produk_id" class="mt-1" />
+                    </div>
+
+                    <!-- Nomor Batch -->
+                    <div class="mt-4">
+                        <div class="flex items-center justify-between">
+                            <InputLabel value="Nomor Batch" />
+                            <span
+                                v-if="currentCreateProductBatches.length > 0"
+                                class="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400"
+                            >
+                                {{ currentCreateProductBatches.length }} Batch Odoo Tersedia
+                            </span>
+                        </div>
+                        <input
+                            v-model="createForm.batch_number"
+                            type="text"
+                            list="mps-create-page-batch-list"
+                            class="mt-1.5 block w-full rounded-xl border-slate-300 font-mono text-xs text-slate-900 shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                            placeholder="Pilih batch Odoo di bawah atau ketik nomor batch..."
+                        />
+                        <datalist id="mps-create-page-batch-list">
+                            <option
+                                v-for="b in currentCreateProductBatches"
+                                :key="`${b.batch_number}-${b.proses}-${b.id}`"
+                                :value="b.batch_number"
+                            >
+                                {{ b.proses ? `[${b.proses.toUpperCase()}] ` : '' }}{{ b.odoo_mo_id ? `MO #${b.odoo_mo_id} (${b.mo_status ?? 'draft'})` : '' }}
+                            </option>
+                        </datalist>
+
+                        <!-- Quick Batch Selector Pills if Odoo batches available -->
+                        <div
+                            v-if="currentCreateProductBatches.length > 0"
+                            class="mt-2 space-y-1.5 rounded-xl border border-indigo-100 bg-indigo-50/50 p-2.5 dark:border-indigo-900/50 dark:bg-indigo-950/20"
+                        >
+                            <div class="flex items-center justify-between text-[11px]">
+                                <span class="flex items-center gap-1 font-semibold text-indigo-900 dark:text-indigo-300">
+                                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                    </svg>
+                                    Pilih Batch Bawaan Odoo:
+                                </span>
+                                <span class="text-[10px] text-slate-500 dark:text-slate-400">Klik untuk memilih & atur Work Center</span>
+                            </div>
+                            <div class="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto pr-0.5">
+                                <button
+                                    v-for="b in currentCreateProductBatches"
+                                    :key="`${b.batch_number}-${b.proses}-${b.id}`"
+                                    type="button"
+                                    class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium transition shadow-xs"
+                                    :class="
+                                        createForm.batch_number === b.batch_number
+                                            ? 'bg-indigo-600 font-bold text-white shadow-sm ring-1 ring-indigo-500'
+                                            : 'border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60'
+                                    "
+                                    @click="selectBatch(b)"
+                                >
+                                    <span class="font-mono font-bold">{{ b.batch_number }}</span>
+                                    <span
+                                        v-if="b.proses"
+                                        class="rounded px-1.5 py-0.2 text-[9px] font-extrabold uppercase tracking-wide"
+                                        :class="
+                                            createForm.batch_number === b.batch_number
+                                                ? 'bg-white/20 text-white'
+                                                : b.proses === 'mixing'
+                                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+                                                : b.proses === 'filling'
+                                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+                                                : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-200'
+                                        "
+                                    >
+                                        {{ b.proses === 'secondary' ? 'packaging' : b.proses }}
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+                        <InputError :message="createForm.errors.batch_number" class="mt-1" />
                     </div>
 
                     <div class="mt-4">

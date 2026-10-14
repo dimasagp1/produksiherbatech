@@ -11,6 +11,7 @@ use App\Models\Line;
 use App\Models\MpsItem;
 use App\Models\MpsPlan;
 use App\Models\Produk;
+use App\Models\WeeklyPlan;
 use App\Models\WorkCenter;
 use App\Services\MpsWeeklyPlanGenerator;
 use App\Services\MrpCalculationService;
@@ -37,6 +38,10 @@ class MpsController extends Controller
 
         $produks = Produk::aktif()->get(['id', 'kode_produk', 'nama_produk']);
         $workCenters = WorkCenter::active()->get(['id', 'code', 'name', 'type', 'is_active']);
+        $odooBatches = WeeklyPlan::whereNotNull('batch_number')
+            ->select(['id', 'produk_id', 'batch_number', 'proses', 'odoo_mo_id', 'mo_status', 'target_output'])
+            ->orderByDesc('id')
+            ->get();
 
         return Inertia::render('PPIC/Mps/Index', [
             'plans' => $plans,
@@ -44,6 +49,7 @@ class MpsController extends Controller
             'status' => $status,
             'produks' => $produks,
             'workCenters' => $workCenters,
+            'odooBatches' => $odooBatches,
         ]);
     }
 
@@ -63,10 +69,15 @@ class MpsController extends Controller
 
         $produks = Produk::aktif()->get(['id', 'kode_produk', 'nama_produk']);
         $workCenters = WorkCenter::active()->get(['id', 'code', 'name', 'type', 'is_active']);
+        $odooBatches = WeeklyPlan::whereNotNull('batch_number')
+            ->select(['id', 'produk_id', 'batch_number', 'proses', 'odoo_mo_id', 'mo_status', 'target_output'])
+            ->orderByDesc('id')
+            ->get();
 
         return Inertia::render('PPIC/Mps/Create', [
             'produks' => $produks,
             'workCenters' => $workCenters,
+            'odooBatches' => $odooBatches,
             'defaultMonth' => now()->format('Y-m'),
         ]);
     }
@@ -75,22 +86,29 @@ class MpsController extends Controller
     {
         $this->checkReadOnly();
         $validated = $request->validated();
+        $batchNumber = ! empty($validated['batch_number']) ? trim($validated['batch_number']) : null;
 
-        // Check if plan already exists for this product + WC + month
-        $exists = MpsPlan::where('produk_id', $validated['produk_id'])
+        // Check if plan already exists for this product + WC + month + batch_number
+        $existsQuery = MpsPlan::where('produk_id', $validated['produk_id'])
             ->where('work_center_id', $validated['work_center_id'])
-            ->where('month_year', $validated['month_year'])
-            ->exists();
+            ->where('month_year', $validated['month_year']);
 
-        if ($exists) {
+        if ($batchNumber) {
+            $existsQuery->where('batch_number', $batchNumber);
+        } else {
+            $existsQuery->whereNull('batch_number');
+        }
+
+        if ($existsQuery->exists()) {
             return back()->withErrors([
-                'month_year' => 'MPS Plan untuk produk dan Work Center ini pada bulan tersebut sudah ada. Buka plan tersebut untuk melihat atau membuat revisi.',
+                'month_year' => 'MPS Plan untuk produk, Work Center'.($batchNumber ? ', dan batch ('.$batchNumber.')' : '').' ini pada bulan tersebut sudah ada. Buka plan tersebut untuk melihat atau membuat revisi.',
             ]);
         }
 
         $plan = MpsPlan::create([
             'produk_id' => $validated['produk_id'],
             'work_center_id' => $validated['work_center_id'],
+            'batch_number' => $batchNumber,
             'month_year' => $validated['month_year'],
             'revision' => 1,
             'is_active_revision' => true,

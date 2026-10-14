@@ -18,6 +18,7 @@ class MpsPlan extends Model
     protected $fillable = [
         'produk_id',
         'work_center_id',
+        'batch_number',
         'month_year',
         'revision',
         'is_active_revision',
@@ -108,6 +109,7 @@ class MpsPlan extends Model
             $newPlan = self::create([
                 'produk_id' => $this->produk_id,
                 'work_center_id' => $this->work_center_id,
+                'batch_number' => $this->batch_number,
                 'month_year' => $this->month_year,
                 'revision' => $newRevisionNumber,
                 'is_active_revision' => false,

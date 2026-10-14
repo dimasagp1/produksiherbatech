@@ -16,6 +16,7 @@ class StoreMpsPlanRequest extends FormRequest
         return [
             'produk_id' => 'required|exists:produks,id',
             'work_center_id' => 'required|exists:work_centers,id',
+            'batch_number' => 'nullable|string|max:100',
             'month_year' => 'required|date_format:Y-m',
             'notes' => 'nullable|string',
         ];

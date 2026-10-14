@@ -31,6 +31,7 @@ interface MpsPlan {
     id: number;
     produk_id: number;
     work_center_id: number;
+    batch_number?: string | null;
     month_year: string;
     revision: number;
     is_active_revision: boolean;
@@ -38,9 +39,20 @@ interface MpsPlan {
     notes: string | null;
     created_by: number;
     produk: Produk;
-    workCenter: WorkCenter;
+    work_center?: WorkCenter;
+    workCenter?: WorkCenter;
     creator: { id: number; name: string };
     items_count: number;
+}
+
+interface OdooBatch {
+    id: number;
+    produk_id: number;
+    batch_number: string;
+    proses?: string;
+    odoo_mo_id?: number | null;
+    mo_status?: string;
+    target_output?: number;
 }
 
 const props = defineProps<{
@@ -55,6 +67,7 @@ const props = defineProps<{
     status: string;
     produks: Produk[];
     workCenters: WorkCenter[];
+    odooBatches?: OdooBatch[];
 }>();
 
 const flash = computed(() => (usePage().props as any).flash ?? {});
@@ -64,6 +77,23 @@ const statusFilter = ref(props.status);
 
 const showCreate = ref(false);
 const deleteId = ref<number | null>(null);
+
+function getWorkCenter(plan: MpsPlan): WorkCenter | undefined {
+    return plan.work_center ?? plan.workCenter;
+}
+
+function getProcessBadgeClass(type?: string): string {
+    if (type === 'mixing') {
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300';
+    }
+    if (type === 'filling') {
+        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300';
+    }
+    if (type === 'secondary') {
+        return 'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300';
+    }
+    return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+}
 
 function formatMonthYear(ym: string): string {
     const [y, m] = ym.split('-');
@@ -84,6 +114,7 @@ function getStatusColor(status: string): string {
 const createForm = useForm({
     produk_id: '',
     work_center_id: '',
+    batch_number: '',
     month_year: props.monthYear,
     notes: '',
 });
@@ -129,6 +160,35 @@ const selectedProduk = computed(() =>
     props.produks.find((p) => p.id === Number(createForm.produk_id)),
 );
 
+const currentCreateProductBatches = computed(() => {
+    const pId = Number(createForm.produk_id);
+    if (!pId || !props.odooBatches) return [];
+
+    const list: OdooBatch[] = [];
+    const seen = new Set<string>();
+    for (const b of props.odooBatches) {
+        if (b.produk_id === pId && b.batch_number) {
+            const key = `${b.batch_number}-${b.proses ?? ''}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                list.push(b);
+            }
+        }
+    }
+    return list;
+});
+
+function selectBatch(b: OdooBatch) {
+    createForm.batch_number = b.batch_number;
+    createForm.clearErrors('batch_number');
+    if (b.proses) {
+        const wc = props.workCenters.find(w => w.type === b.proses && w.is_active);
+        if (wc) {
+            createForm.work_center_id = String(wc.id);
+        }
+    }
+}
+
 function toggleProdukDropdown() {
     produkDropdownOpen.value = !produkDropdownOpen.value;
     if (produkDropdownOpen.value) {
@@ -139,14 +199,22 @@ function toggleProdukDropdown() {
 function chooseProduk(p: Produk) {
     createForm.produk_id = String(p.id);
     createForm.clearErrors('produk_id');
+    createForm.batch_number = '';
     produkDropdownOpen.value = false;
     produkSearch.value = '';
+
+    // Auto-select if exactly 1 batch exists from Odoo
+    const batches = currentCreateProductBatches.value;
+    if (batches.length === 1) {
+        selectBatch(batches[0]);
+    }
 }
 
 function openCreate() {
     createForm.reset();
     createForm.clearErrors();
     createForm.month_year = props.monthYear;
+    createForm.batch_number = '';
     produkSearch.value = '';
     produkDropdownOpen.value = false;
     showCreate.value = true;
@@ -262,6 +330,7 @@ function getStatusLabel(status: string): string {
                             <tr>
                                 <th class="px-4 py-3">Bulan</th>
                                 <th class="px-4 py-3">Produk</th>
+                                <th class="px-4 py-3">Nomor Batch</th>
                                 <th class="px-4 py-3">Work Center</th>
                                 <th class="px-4 py-3">Status</th>
                                 <th class="px-4 py-3 text-right">Items</th>
@@ -270,7 +339,7 @@ function getStatusLabel(status: string): string {
                         </thead>
                         <tbody class="divide-y divide-gray-100 dark:divide-gray-700/60">
                             <tr v-if="props.plans.data.length === 0" class="text-center">
-                                <td colspan="6" class="py-12 text-gray-400 dark:text-gray-500">
+                                <td colspan="7" class="py-12 text-gray-400 dark:text-gray-500">
                                     <div class="flex flex-col items-center justify-center">
                                         <svg class="h-10 w-10 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -304,16 +373,32 @@ function getStatusLabel(status: string): string {
                                     </div>
                                 </td>
                                 <td class="px-4 py-3">
+                                    <div class="flex flex-wrap items-center gap-1.5">
+                                        <span class="font-mono text-xs font-bold text-gray-900 dark:text-gray-100">
+                                            {{ plan.batch_number || '—' }}
+                                        </span>
+                                        <span
+                                            v-if="getWorkCenter(plan)?.type"
+                                            class="rounded px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide"
+                                            :class="getProcessBadgeClass(getWorkCenter(plan)?.type)"
+                                        >
+                                            {{ getWorkCenter(plan)?.type === 'secondary' ? 'packaging' : getWorkCenter(plan)?.type }}
+                                        </span>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3">
                                     <span
+                                        v-if="getWorkCenter(plan)"
                                         class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold"
                                         :class="{
-                                            'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300': plan.workCenter?.type === 'mixing',
-                                            'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300': plan.workCenter?.type === 'filling',
-                                            'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300': plan.workCenter?.type === 'secondary',
+                                            'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300': getWorkCenter(plan)?.type === 'mixing',
+                                            'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300': getWorkCenter(plan)?.type === 'filling',
+                                            'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300': getWorkCenter(plan)?.type === 'secondary',
                                         }"
                                     >
-                                        {{ plan.workCenter?.code }} - {{ plan.workCenter?.name }}
+                                        {{ getWorkCenter(plan)?.code }} - {{ getWorkCenter(plan)?.name }}
                                     </span>
+                                    <span v-else class="text-xs text-gray-400">—</span>
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-3">
                                     <span :class="['inline-flex w-max rounded-md px-2 py-0.5 text-[10px] font-bold uppercase', getStatusColor(plan.status)]">
@@ -475,6 +560,83 @@ function getStatusLabel(status: string): string {
                             :message="createForm.errors.produk_id"
                             class="mt-1"
                         />
+                    </div>
+
+                    <!-- Nomor Batch -->
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <InputLabel value="Nomor Batch" />
+                            <span
+                                v-if="currentCreateProductBatches.length > 0"
+                                class="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400"
+                            >
+                                {{ currentCreateProductBatches.length }} Batch Odoo Tersedia
+                            </span>
+                        </div>
+                        <input
+                            v-model="createForm.batch_number"
+                            type="text"
+                            list="mps-create-batch-list"
+                            class="mt-1.5 block w-full rounded-xl border-gray-300 font-mono text-xs text-gray-900 shadow-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                            placeholder="Pilih batch Odoo di bawah atau ketik nomor batch..."
+                        />
+                        <datalist id="mps-create-batch-list">
+                            <option
+                                v-for="b in currentCreateProductBatches"
+                                :key="`${b.batch_number}-${b.proses}-${b.id}`"
+                                :value="b.batch_number"
+                            >
+                                {{ b.proses ? `[${b.proses.toUpperCase()}] ` : '' }}{{ b.odoo_mo_id ? `MO #${b.odoo_mo_id} (${b.mo_status ?? 'draft'})` : '' }}
+                            </option>
+                        </datalist>
+
+                        <!-- Quick Batch Selector Pills if Odoo batches available -->
+                        <div
+                            v-if="currentCreateProductBatches.length > 0"
+                            class="mt-2 space-y-1.5 rounded-xl border border-indigo-100 bg-indigo-50/50 p-2.5 dark:border-indigo-900/50 dark:bg-indigo-950/20"
+                        >
+                            <div class="flex items-center justify-between text-[11px]">
+                                <span class="flex items-center gap-1 font-semibold text-indigo-900 dark:text-indigo-300">
+                                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                    </svg>
+                                    Pilih Batch Bawaan Odoo:
+                                </span>
+                                <span class="text-[10px] text-gray-500">Klik untuk memilih & atur Work Center</span>
+                            </div>
+                            <div class="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto pr-0.5">
+                                <button
+                                    v-for="b in currentCreateProductBatches"
+                                    :key="`${b.batch_number}-${b.proses}-${b.id}`"
+                                    type="button"
+                                    class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium transition shadow-xs"
+                                    :class="
+                                        createForm.batch_number === b.batch_number
+                                            ? 'bg-indigo-600 font-bold text-white shadow-sm ring-1 ring-indigo-500'
+                                            : 'border border-gray-200 bg-white text-gray-700 hover:border-indigo-300 hover:bg-indigo-50/50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/60'
+                                    "
+                                    @click="selectBatch(b)"
+                                >
+                                    <span class="font-mono font-bold">{{ b.batch_number }}</span>
+                                    <span
+                                        v-if="b.proses"
+                                        class="rounded px-1.5 py-0.2 text-[9px] font-extrabold uppercase tracking-wide"
+                                        :class="
+                                            createForm.batch_number === b.batch_number
+                                                ? 'bg-white/20 text-white'
+                                                : b.proses === 'mixing'
+                                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+                                                : b.proses === 'filling'
+                                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+                                                : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-200'
+                                        "
+                                    >
+                                        {{ b.proses === 'secondary' ? 'packaging' : b.proses }}
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+                        <InputError :message="createForm.errors.batch_number" class="mt-1" />
                     </div>
 
                     <div>

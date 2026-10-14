@@ -62,7 +62,7 @@ class MpsWeeklyPlanGenerator
                     continue;
                 }
 
-                $batchNumber = $this->generateBatchNumber($plan, $item);
+                $batchNumber = ! empty($plan->batch_number) ? $plan->batch_number : $this->generateBatchNumber($plan, $item);
 
                 WeeklyPlan::create([
                     'produk_id' => $plan->produk_id,
