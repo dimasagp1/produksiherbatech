@@ -84,8 +84,8 @@ class MrpCalculationService
             $incoming = 0;
             if ($matProdukId && ! empty($incomingPoLines)) {
                 foreach ($incomingPoLines as $poLine) {
-                    $odooProdId = is_array($poLine['product_id'] ?? null) ? $poLine['product_id'][0] : null;
-                    if ($odooProdId && $matProd?->odoo_product_id == $odooProdId) {
+                    $poProdName = is_array($poLine['product_id'] ?? null) ? $poLine['product_id'][1] : ($poLine['name'] ?? null);
+                    if (($odooProdId && $matProd?->odoo_id == $odooProdId) || ($matProd?->nama_produk && $matProd?->nama_produk === $poProdName)) {
                         $qtyRemaining = max(0, (float) ($poLine['product_qty'] ?? 0) - (float) ($poLine['qty_received'] ?? 0));
                         $incoming += ($qtyRemaining * $stockFactor);
                     }

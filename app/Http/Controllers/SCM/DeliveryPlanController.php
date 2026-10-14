@@ -279,32 +279,42 @@ class DeliveryPlanController extends Controller
 
                 $partner = is_array($so['partner_id'] ?? null) ? $so['partner_id'][1] : ('SO #'.$soId);
 
-                $plan = DeliveryPlan::create([
-                    'delivery_number' => $this->numbers->delivery(),
-                    'odoo_so_id' => $soId,
-                    'customer_name' => $partner,
-                    'planned_date' => now()->addDay()->toDateString(),
-                    'status' => 'planned',
-                    'revenue_coa' => Setting::get('revenue_coa_primary', '41000010'),
-                    'notes' => 'Auto dari Odoo SO '.($so['name'] ?? $soId),
-                    'created_by' => auth()->id(),
-                ]);
-
-                foreach ($so['lines'] ?? [] as $lineItem) {
-                    $odooProdId = is_array($lineItem['product_id'] ?? null) ? $lineItem['product_id'][0] : null;
-                    $prodName = is_array($lineItem['product_id'] ?? null) ? $lineItem['product_id'][1] : ($lineItem['name'] ?? 'Item');
-                    $localProd = $odooProdId ? Produk::where('odoo_product_id', $odooProdId)->first() : null;
-                    $uomName = is_array($lineItem['product_uom'] ?? null) ? $lineItem['product_uom'][1] : 'Pcs';
-
-                    $plan->items()->create([
-                        'produk_id' => $localProd?->id,
-                        'product_name' => $localProd?->nama_produk ?? $prodName,
-                        'quantity' => (float) ($lineItem['product_uom_qty'] ?? 1),
-                        'uom_name' => $uomName,
+                DB::transaction(function () use ($so, $soId, $partner, &$created) {
+                    $plan = DeliveryPlan::create([
+                        'delivery_number' => $this->numbers->delivery(),
+                        'odoo_so_id' => $soId,
+                        'customer_name' => $partner,
+                        'planned_date' => now()->addDay()->toDateString(),
+                        'status' => 'planned',
+                        'revenue_coa' => Setting::get('revenue_coa_primary', '41000010'),
+                        'notes' => 'Auto dari Odoo SO '.($so['name'] ?? $soId),
+                        'created_by' => auth()->id(),
                     ]);
-                }
 
-                $created++;
+                    foreach ($so['lines'] ?? [] as $lineItem) {
+                        $odooProdId = is_array($lineItem['product_id'] ?? null) ? $lineItem['product_id'][0] : null;
+                        $prodName = is_array($lineItem['product_id'] ?? null) ? $lineItem['product_id'][1] : ($lineItem['name'] ?? 'Item');
+
+                        $localProd = null;
+                        if ($odooProdId) {
+                            $localProd = Produk::where('odoo_id', $odooProdId)->first();
+                        }
+                        if (! $localProd && $prodName) {
+                            $localProd = Produk::where('nama_produk', $prodName)->first();
+                        }
+
+                        $uomName = is_array($lineItem['product_uom'] ?? null) ? $lineItem['product_uom'][1] : 'Pcs';
+
+                        $plan->items()->create([
+                            'produk_id' => $localProd?->id,
+                            'product_name' => $localProd?->nama_produk ?? $prodName,
+                            'quantity' => (float) ($lineItem['product_uom_qty'] ?? 1),
+                            'uom_name' => $uomName,
+                        ]);
+                    }
+
+                    $created++;
+                });
             }
 
             return back()->with('success', "Sync SO Odoo: {$created} baru, {$skipped} dilewati");
